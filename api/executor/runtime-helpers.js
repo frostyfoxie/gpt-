@@ -9,7 +9,7 @@ const MAX_BACKGROUND_PROCESSES_PER_PROJECT = 4;
 const THETA_WORKSPACE = '/tmp/theta-project';
 
 function shellQuote(value) {
-  return `'${String(value).replace(/'/g, `\'"'"'`)}'`;
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
 function parsePort(value, fallback = 4173) {
@@ -101,7 +101,8 @@ async function syncFiles(client, files, deletedPaths = [], workspace = THETA_WOR
   for (const path of deleted) delete next[path];
 
   const stage = `${workspace}/.theta-stage-${crypto.randomUUID()}`;
-  await client.commands.run(`mkdir -p ${shellQuote(stage)}`);
+  const backup = `${stage}/.theta-backup`;
+  await client.commands.run(`mkdir -p ${shellQuote(stage)} ${shellQuote(backup)}`);
   try {
     let commands = [];
     let bytes = 0;
@@ -126,6 +127,18 @@ async function syncFiles(client, files, deletedPaths = [], workspace = THETA_WOR
     const stagedManifest = `${stage}/.theta-manifest.json`;
     await client.commands.run(`printf %s ${shellQuote(manifest)} | base64 -d > ${shellQuote(stagedManifest)}`);
 
+    // Snapshot every path that the commit may change. If any later command
+    // fails, the snapshot lets us restore the exact pre-sync state before the
+    // error is returned. The manifest is still moved last, so it never claims
+    // a sync that was only partially committed.
+    const affectedPaths = [...new Set([...toWrite.map((file) => file.path), ...deleted])];
+    const backupCommands = affectedPaths.map((path) => {
+      const target = `${workspace}/${path}`;
+      const saved = `${backup}/${path}`;
+      return `if [ -e ${shellQuote(target)} ] || [ -L ${shellQuote(target)} ]; then mkdir -p $(dirname ${shellQuote(saved)}) && cp -a ${shellQuote(target)} ${shellQuote(saved)}; fi`;
+    });
+    if (backupCommands.length) await client.commands.run(backupCommands.join(' && '));
+
     const commitCommands = [];
     for (const file of toWrite) {
       const source = `${stage}/${file.path}`;
@@ -134,7 +147,30 @@ async function syncFiles(client, files, deletedPaths = [], workspace = THETA_WOR
     }
     for (const path of deleted) commitCommands.push(`rm -f ${shellQuote(`${workspace}/${path}`)}`);
     commitCommands.push(`mv ${shellQuote(stagedManifest)} ${shellQuote(manifestPath)}`);
-    if (commitCommands.length) await client.commands.run(commitCommands.join(' && '));
+
+    try {
+      if (commitCommands.length) await client.commands.run(commitCommands.join(' && '));
+    } catch (commitError) {
+      // Restore every affected path. Removing first also handles a newly
+      // created file where no backup existed, and cp -a restores the exact
+      // previous file for paths that did exist.
+      const rollbackCommands = affectedPaths.map((path) => {
+        const target = `${workspace}/${path}`;
+        const saved = `${backup}/${path}`;
+        return `rm -rf ${shellQuote(target)}; if [ -e ${shellQuote(saved)} ] || [ -L ${shellQuote(saved)} ]; then mkdir -p $(dirname ${shellQuote(target)}) && cp -a ${shellQuote(saved)} ${shellQuote(target)}; fi`;
+      });
+      try {
+        if (rollbackCommands.length) await client.commands.run(rollbackCommands.join(' && '));
+      } catch (rollbackError) {
+        const err = new Error(`File sync commit failed and rollback also failed: ${commitError?.message || commitError}`);
+        err.code = 'EXECUTOR_SYNC_ROLLBACK_FAILED';
+        err.cause = rollbackError;
+        throw err;
+      }
+      const err = new Error(`File sync commit failed; all changes were rolled back: ${commitError?.message || commitError}`);
+      err.code = 'EXECUTOR_SYNC_ROLLED_BACK';
+      throw err;
+    }
 
     for (const path of deleted) {
       const target = `${workspace}/${path}`;
