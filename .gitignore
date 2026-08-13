@@ -1,0 +1,14 @@
+# local env files
+.env
+.env.local
+.env.*.local
+
+#old files
+src/config/keys-modal.original.ts
+
+# deps / build output
+node_modules
+dist
+
+# Vercel local dev cache
+.vercel

@@ -1,0 +1,60 @@
+[
+  {
+    "task": "Improve the dashboard spacing, typography and responsive layout",
+    "focus": "ui"
+  },
+  {
+    "task": "Fix the API endpoint returning 401 after the auth change",
+    "focus": "backend"
+  },
+  {
+    "task": "Add a Supabase migration for research_patterns RLS",
+    "focus": "data"
+  },
+  {
+    "task": "Fix the race condition in parallel file writes",
+    "focus": "logic"
+  },
+  {
+    "task": "Update the deployment guide with the new migration",
+    "focus": "docs"
+  },
+  {
+    "task": "Build the complete feature from database through UI",
+    "focus": "full-stack"
+  },
+  {
+    "task": "Explain a form of validation in the docs",
+    "focus": "docs"
+  },
+  {
+    "task": "Optimize the database indexes for the projects table.",
+    "targetFile": "supabase/migrations/011.sql",
+    "expectedFocus": "data"
+  },
+  {
+    "task": "Improve the landing page typography and responsive spacing.",
+    "targetFile": "src/app.css",
+    "expectedFocus": "ui"
+  },
+  {
+    "task": "Fix the API rate limit middleware.",
+    "targetFile": "api/executor/index.js",
+    "expectedFocus": "backend"
+  },
+  {
+    "task": "Update the deployment guide for Supabase migrations.",
+    "targetFile": "DEPLOY.md",
+    "expectedFocus": "docs"
+  },
+  {
+    "task": "Fix the race condition in the shared file lock.",
+    "targetFile": "src/engine/state-lock.ts",
+    "expectedFocus": "logic"
+  },
+  {
+    "task": "Add the dashboard and its API endpoint end to end.",
+    "targetFile": "src/dashboard.tsx",
+    "expectedFocus": "full-stack"
+  }
+]

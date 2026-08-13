@@ -1,0 +1,3211 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full dark" id="themeRoot">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theta Workspace</title>
+    
+    <!-- Tailwind CSS: compiled at build time via PostCSS (see tailwind.config.js / postcss.config.js).
+         Previously this loaded the Tailwind Play CDN script at runtime; if that request was ever
+         blocked (ad blockers, corporate proxies, flaky networks) the page rendered as unstyled,
+         stacked plain text. Building it into the bundle removes that runtime dependency entirely. -->
+    <link rel="stylesheet" href="/src/styles/tailwind.css">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- JSZip and FileSaver used to load from cdnjs at runtime here. If that request was ever
+         blocked (ad blockers, corporate proxies, flaky networks — the same failure mode that broke
+         Tailwind above) every download button threw "JSZip/saveAs is not defined" with no visible
+         error. Both are now real npm dependencies bundled at build time (see src/index.ts, which
+         attaches them to window.JSZip / window.saveAs for this file's plain-script code to use). -->
+
+    <style>
+        /* Theme Variables: Dark (Default) */
+        :root.dark {
+            --bg-main: #09090b;
+            --panel-bg: #121215;
+            --panel-hover: #1c1c21;
+            --border-color: #27272a;
+            --text-primary: #f4f4f5;
+            --text-muted: #71717a;
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+            --code-bg: #0b0b0e;
+            --terminal-bg: #08060d;
+            --terminal-text: #e4e4e7;
+            --scroll-track: #121215;
+            --scroll-thumb: #27272a;
+        }
+
+        /* Theme Variables: Light Mode */
+        :root.light {
+            --bg-main: #f1f5f9;
+            --panel-bg: #ffffff;
+            --panel-hover: #f8fafc;
+            --border-color: #e2e8f0;
+            --text-primary: #0f172a;
+            --text-muted: #64748b;
+            --accent: #4f46e5;
+            --accent-hover: #4338ca;
+            --code-bg: #f8fafc;
+            --terminal-bg: #f1f5f9;
+            --terminal-text: #1e293b;
+            --scroll-track: #f1f5f9;
+            --scroll-thumb: #cbd5e1;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            user-select: none;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--scroll-track);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--scroll-thumb);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            opacity: 0.8;
+        }
+
+        /* Resizer styles */
+        .resizer-h {
+            width: 6px;
+            min-width: 6px;
+            cursor: col-resize;
+            touch-action: none;
+            user-select: none;
+            transition: background-color 0.15s ease;
+            position: relative;
+            z-index: 20;
+            background-color: transparent;
+        }
+        .resizer-h:hover, .resizer-h.dragging {
+            background-color: var(--accent);
+        }
+        .resizer-h::after { content: ''; display: block; width: 2px; height: 24px; margin: calc(50vh - 12px) auto 0; border-radius: 2px; background: var(--border-color); opacity: .55; }
+        .resizer-h:hover::after, .resizer-h.dragging::after { background: #fff; opacity: .9; }
+
+        .resizer-v {
+            height: 6px;
+            min-height: 6px;
+            cursor: row-resize;
+            touch-action: none;
+            user-select: none;
+            transition: background-color 0.15s ease;
+            position: relative;
+            z-index: 20;
+            background-color: transparent;
+        }
+        .resizer-v:hover, .resizer-v.dragging {
+            background-color: var(--accent);
+        }
+        .resizer-v::after { content: ''; display: block; width: 28px; height: 2px; margin: 1px auto 0; border-radius: 2px; background: var(--border-color); opacity: .55; }
+        .resizer-v:hover::after, .resizer-v.dragging::after { background: #fff; opacity: .9; }
+        body.theta-resizing, body.theta-resizing * {
+            user-select: none !important;
+        }
+        body.theta-resizing {
+            touch-action: none !important;
+            overscroll-behavior: none !important;
+        }
+        body.theta-resizing.theta-resize-x, body.theta-resizing.theta-resize-x * { cursor: col-resize !important; }
+        body.theta-resizing.theta-resize-y, body.theta-resizing.theta-resize-y * { cursor: row-resize !important; }
+        #workspaceContainer, #leftPanel, #centerPanel, #editorPanel, #rightPanel, #bottomPanel { min-width: 0; min-height: 0; }
+        #leftPanel, #rightPanel { flex: 0 0 auto; }
+        #centerPanel { flex: 1 1 auto; }
+        .theta-no-transition, .theta-no-transition * { transition: none !important; }
+        body.theta-resizing .resizer-v, body.theta-resizing .resizer-v * { cursor: row-resize !important; }
+        @media (max-width: 900px) {
+            #leftPanel { width: 240px; min-width: 190px; }
+            #rightPanel { width: 320px; min-width: 260px; }
+            #workspaceContainer { padding: 4px !important; }
+            #globalSearchWrap { display: none; }
+        }
+        @media (max-width: 720px) {
+            #leftPanel { width: 220px; min-width: 180px; }
+            #rightPanel { width: min(88vw, 360px); min-width: 250px; }
+            .resizer-h { width: 8px; margin-left: 0 !important; margin-right: 0 !important; }
+            .resizer-v { height: 8px; margin-top: 0 !important; margin-bottom: 0 !important; }
+        }
+
+
+        /* High-contrast terminal/log palette in light mode. Tailwind's 300-level colors are too faint on white. */
+        :root.light .text-amber-300 { color: #92400e !important; }
+        :root.light .text-cyan-400, :root.light .text-cyan-500 { color: #0f766e !important; }
+        :root.light .text-emerald-300, :root.light .text-emerald-400 { color: #047857 !important; }
+        :root.light .text-rose-300, :root.light .text-red-300 { color: #b91c1c !important; }
+        :root.light .text-slate-300 { color: #334155 !important; }
+        :root.light #terminalOutput { color: #0f172a; }
+
+        /* Workbench Frame panel styles */
+        .workbench-panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            transition: border-color 0.15s ease, background-color 0.2s ease;
+        }
+
+
+        /* Coding workspace content must remain selectable/copyable. */
+        #chatMessages, #chatMessages *, #terminalOutput, #terminalOutput *, #agentLogStream, #agentLogStream *, #toastContainer, #toastContainer * { user-select: text; }
+        #terminalInputField, #chatInput, #globalSearchInput, #fileSearchInput { user-select: text; }
+        .icon-btn[title] { min-width: 32px; min-height: 32px; }
+
+        code, pre {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* File Tree Hover */
+        .file-item {
+            transition: background-color 0.1s ease;
+        }
+        .file-item:hover {
+            background-color: var(--panel-hover);
+        }
+        .file-item.active {
+            background-color: rgba(99, 102, 241, 0.12);
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .action-btn-group {
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+        .file-item:hover .action-btn-group {
+            opacity: 1;
+        }
+
+        /* ===================== About Theta panel (Phase 5) ===================== */
+        #aboutThetaOverlay {
+            font-family: 'Inter', sans-serif;
+        }
+        #aboutThetaOverlay .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        #thetaMatrixCanvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.35;
+            pointer-events: none;
+        }
+        #asciiCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            cursor: grab;
+            touch-action: none;
+        }
+        #asciiCanvas.dragging {
+            cursor: grabbing;
+        }
+        .theta-typewriter-cursor {
+            display: inline-block;
+            width: 0.5ch;
+            margin-left: 2px;
+            background: var(--accent);
+            animation: theta-cursor-blink 0.9s steps(1) infinite;
+        }
+        @keyframes theta-cursor-blink {
+            0%, 49% { opacity: 1; }
+            50%, 100% { opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .theta-typewriter-cursor { animation: none; opacity: 1; }
+        }
+        .theta-liquid-divider {
+            position: relative;
+            height: 90px;
+            margin-top: -1px;
+        }
+        .theta-liquid-divider svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .theta-feature-card {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            transition: border-color 0.2s ease, transform 0.2s ease;
+        }
+        .theta-feature-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+        .theta-card-index {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent);
+            opacity: 0.6;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+        }
+        .theta-timeline-cap {
+            width: 10px;
+            height: 10px;
+            border-radius: 9999px;
+            background: var(--accent);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
+        }
+        .theta-mock-toggle[data-active="false"] {
+            color: var(--text-muted);
+        }
+        .theta-mock-toggle[data-active="true"] {
+            color: var(--accent);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col overflow-none bg-theta-bg text-theta-text">
+
+    <!-- ===================== Auth Gate (Phase 6) =====================
+         Full-screen sign-in gate shown whenever there's no active Supabase session. Wired up
+         by src/ui-adapters/auth-gate.ts, which toggles this vs #workspaceShell based on
+         onAuthStateChange / getSession(). Visible by default so there's no unauthenticated
+         flash of the workspace before JS runs. -->
+    <div id="authGate" class="fixed inset-0 z-[100] flex items-center justify-center bg-theta-bg p-4">
+        <div class="w-full max-w-xs bg-theta-panel border border-theta-border rounded-2xl shadow-2xl p-7 flex flex-col items-center">
+            <div class="flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-600/20 text-indigo-500 font-bold text-2xl border border-indigo-500/30 mb-4">
+                θ
+            </div>
+            <h1 class="font-semibold text-lg tracking-tight text-theta-text mb-1">Theta Workbench</h1>
+            <p class="text-xs text-theta-muted mb-6 text-center">Sign in to open your workspace.</p>
+
+            <div class="w-full space-y-2.5">
+                <button id="authGoogleBtn" class="w-full h-10 rounded-lg bg-theta-bg border border-theta-border hover:bg-theta-panelHover active:scale-[0.98] text-theta-text font-medium text-xs transition-all flex items-center justify-center gap-2.5">
+                    <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.3 9 5 12 5z"/>
+                        <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.6h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.9z"/>
+                        <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12 0 14.8s.7 5.1 1.9 7.5l3.7-2.9z"/>
+                        <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.3-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"/>
+                    </svg>
+                    <span>Continue with Google</span>
+                </button>
+                <button id="authGithubBtn" class="w-full h-10 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-medium text-xs transition-all flex items-center justify-center gap-2.5">
+                    <i data-lucide="github" class="w-4 h-4 shrink-0"></i>
+                    <span>Continue with GitHub</span>
+                </button>
+            </div>
+
+            <p class="text-[10px] text-theta-muted mt-5 text-center">Signing in creates your account automatically — there's no separate sign-up.</p>
+        </div>
+    </div>
+
+    <!-- ===================== Projects Dashboard (Phase 3) ===================== -->
+    <div id="projectsDashboard" class="hidden fixed inset-0 z-[90] flex flex-col bg-theta-bg">
+        <header class="h-14 shrink-0 border-b border-theta-border bg-theta-panel px-5 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-500 font-bold text-base border border-indigo-500/30">θ</div>
+                <div>
+                    <div class="font-semibold text-sm tracking-tight text-theta-text">Theta Workbench</div>
+                    <div class="text-[10px] text-theta-muted">Projects</div>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="dashboardNewProjectBtn" onclick="document.getElementById('newProjectBtn')?.click()" class="px-3 py-1.5 rounded-lg bg-theta-accent hover:bg-theta-accentHover text-white text-xs font-medium transition flex items-center gap-1.5">
+                    <i data-lucide="plus" class="w-3.5 h-3.5"></i><span>New Project</span>
+                </button>
+                <div class="w-7"></div>
+            </div>
+        </header>
+        <main class="flex-1 overflow-y-auto p-6 md:p-10">
+            <div class="max-w-6xl mx-auto">
+                <div class="mb-6">
+                    <h1 id="projectsDashboardTitle" class="text-2xl font-semibold tracking-tight text-theta-text">Your Projects</h1>
+                    <p id="projectsDashboardSubtitle" class="text-xs text-theta-muted mt-1">Loading projects…</p>
+                </div>
+                <div id="projectsDashboardList" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+                <section class="mt-8 max-w-3xl">
+                    <div class="flex items-end justify-between mb-2">
+                        <div>
+                            <h2 class="text-sm font-semibold text-theta-text">Recent Activity</h2>
+                            <p class="text-[10px] text-theta-muted mt-0.5">Commits are kept for 7 days, then removed automatically.</p>
+                        </div>
+                    </div>
+                    <div id="recentProjectsActivity" class="bg-theta-panel border border-theta-border rounded-xl px-3"></div>
+                </section>
+                <button id="newProjectBtn" class="hidden" aria-hidden="true"></button>
+            </div>
+        </main>
+    </div>
+
+    <!-- ===================== Workspace Shell (Phase 6) =====================
+         Everything below is today's app UI, unchanged, just wrapped so it can be hidden while
+         #authGate is showing. Starts hidden to match #authGate's "visible by default" state;
+         auth-gate.ts flips these two based on session state as soon as it boots. -->
+    <div id="workspaceShell" class="hidden h-full w-full flex flex-col">
+
+    <!-- Top Navigation Bar -->
+    <header class="h-12 border-b border-theta-border bg-theta-panel px-4 flex items-center justify-between shrink-0 z-30 transition-colors">
+        <!-- Logo & Brand -->
+        <div class="flex items-center space-x-2.5 w-1/4 select-none">
+            <div class="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-600/20 text-indigo-500 font-bold text-base border border-indigo-500/30">
+                θ
+            </div>
+            <button id="projectsBackBtn" title="Back to projects" class="p-1 rounded-md text-theta-muted hover:text-theta-text hover:bg-theta-panelHover transition" aria-label="Back to projects">
+                <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+            </button>
+            <span class="font-semibold text-base tracking-tight text-theta-text">Theta</span>
+            <span id="activeProjectName" class="max-w-[180px] truncate text-[10px] text-theta-muted border-l border-theta-border pl-2"></span>
+            <!-- Connection Status Badge -->
+            <span id="connectionStatusBadge" title="Terminal connection status" aria-label="Terminal connection status: disconnected" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-500/10 text-slate-400 border border-slate-500/20 transition-all duration-300">
+                <span class="relative flex h-2 w-2">
+                  <span id="statusPulseDot" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span id="statusSolidDot" class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span id="connectionStatusText">Terminal: disconnected</span>
+            </span>
+            <span id="persistenceStatusBadge" title="Project persistence status" aria-label="Project persistence: unknown" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                <span id="persistenceStatusDot" class="inline-flex rounded-full h-2 w-2 bg-slate-400"></span>
+                <span id="persistenceStatusText">Persistence: checking</span>
+            </span>
+        </div>
+
+        <!-- Center Search Box -->
+        <div class="flex-1 flex justify-center max-w-md mx-auto">
+            <div class="relative w-full" id="globalSearchWrapper">
+                <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-theta-muted"></i>
+                <input 
+                    type="text" 
+                    id="globalSearchInput"
+                    autocomplete="off"
+                    oninput="handleGlobalSearchInput(this.value)"
+                    onfocus="handleGlobalSearchInput(this.value)"
+                    placeholder="Search files, symbols, commands... (⌘K)" 
+                    class="w-full bg-theta-bg border border-theta-border rounded-md pl-9 pr-14 py-1.5 text-xs text-theta-text placeholder-theta-muted focus:outline-none focus:border-indigo-500/80 focus:ring-1 focus:ring-indigo-500/50 transition"
+                >
+                <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-0.5 pointer-events-none">
+                    <kbd class="text-[10px] font-mono text-theta-muted bg-theta-panel px-1.5 py-0.5 rounded border border-theta-border">⌘K</kbd>
+                </div>
+                <div id="globalSearchResults" class="hidden absolute left-0 right-0 top-full mt-1 bg-theta-panel border border-theta-border rounded-md shadow-2xl max-h-80 overflow-y-auto z-40 text-left"></div>
+            </div>
+        </div>
+
+        <!-- Right Quick Controls -->
+        <div class="flex items-center justify-end space-x-1.5 w-1/4 relative">
+            <button onclick="togglePanel('leftPanel')" title="Toggle File Directory" class="p-1.5 hover:bg-theta-panelHover rounded-md text-theta-muted hover:text-theta-text transition" aria-label="Toggle File Directory">
+                <i data-lucide="panel-left" class="w-4 h-4"></i>
+            </button>
+            <button onclick="togglePanel('bottomPanel')" title="Toggle Terminal" class="p-1.5 hover:bg-theta-panelHover rounded-md text-theta-muted hover:text-theta-text transition" aria-label="Toggle Terminal">
+                <i data-lucide="panel-bottom" class="w-4 h-4"></i>
+            </button>
+            <button onclick="togglePanel('rightPanel')" title="Toggle Chat Window" class="p-1.5 hover:bg-theta-panelHover rounded-md text-theta-muted hover:text-theta-text transition" aria-label="Toggle Chat Window">
+                <i data-lucide="panel-right" class="w-4 h-4"></i>
+            </button>
+            <!-- Phase 4: quota status badge + dropdown injected here by QuotaStatusPanel -->
+            <div id="quotaPanelAnchor" class="h-4 w-[1px] bg-theta-border mx-1"></div>
+            
+            <!-- Settings Menu Trigger -->
+            <div class="relative">
+                <button id="settingsBtn" onclick="toggleSettingsMenu()" class="p-1.5 hover:bg-theta-panelHover rounded-md text-theta-muted hover:text-theta-text transition" title="Settings & Themes" aria-label="Settings & Themes">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                </button>
+
+                <!-- Settings Dropdown Popup -->
+                <div id="settingsMenu" class="hidden absolute right-0 top-full mt-2 w-64 bg-theta-panel border border-theta-border rounded-xl shadow-2xl p-3 z-50 text-xs space-y-3">
+                    <div class="flex items-center justify-between pb-2 border-b border-theta-border">
+                        <span class="font-semibold text-theta-text flex items-center gap-1.5">
+                            <i data-lucide="sliders" class="w-3.5 h-3.5 text-theta-accent"></i> Workbench Settings
+                        </span>
+                        <button onclick="toggleSettingsMenu()" class="text-theta-muted hover:text-theta-text">
+                            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+
+                    <div class="space-y-1.5">
+                        <label class="text-[11px] font-medium text-theta-muted uppercase tracking-wider block">Interface Theme</label>
+                        <div class="grid grid-cols-2 gap-1.5 p-1 bg-theta-bg border border-theta-border rounded-lg">
+                            <button id="themeDarkBtn" onclick="setTheme('dark')" class="flex items-center justify-center space-x-1.5 py-1.5 px-2 rounded-md transition text-xs font-medium">
+                                <i data-lucide="moon" class="w-3.5 h-3.5"></i>
+                                <span>Theta Dark</span>
+                            </button>
+                            <button id="themeLightBtn" onclick="setTheme('light')" class="flex items-center justify-center space-x-1.5 py-1.5 px-2 rounded-md transition text-xs font-medium">
+                                <i data-lucide="sun" class="w-3.5 h-3.5 text-amber-500"></i>
+                                <span>Pro White</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-1.5">
+                        <label class="text-[11px] font-medium text-theta-muted uppercase tracking-wider block">Code Font Size</label>
+                        <select id="fontSizeSelect" onchange="changeFontSize(this.value)" class="w-full bg-theta-bg border border-theta-border text-theta-text rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-theta-accent">
+                            <option value="11">11px - Compact</option>
+                            <option value="12" selected>12px - Default</option>
+                            <option value="14">14px - Medium</option>
+                            <option value="16">16px - Large</option>
+                        </select>
+                    </div>
+
+                    <div class="pt-2 border-t border-theta-border">
+                        <button id="openApiKeysMenuItem" class="w-full flex items-center gap-2 py-1.5 px-2 rounded-md text-xs font-medium text-theta-text hover:bg-theta-panelHover transition">
+                            <i data-lucide="key" class="w-3.5 h-3.5 text-theta-accent"></i>
+                            <span>Configure Gemini API Keys</span>
+                        </button>
+                        <a id="thetaMainLink" href="https://theta-main.vercel.app/" target="_blank" rel="noopener noreferrer" onclick="toggleSettingsMenu()" class="w-full flex items-center gap-2 py-1.5 px-2 rounded-md text-xs font-medium text-theta-text hover:bg-theta-panelHover transition">
+                            <i data-lucide="external-link" class="w-3.5 h-3.5 text-theta-accent"></i>
+                            <span>Theta Main</span>
+                            <i data-lucide="arrow-up-right" class="w-3 h-3 ml-auto text-theta-muted"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Menu (Phase 6) — populated from the signed-in session by src/ui-adapters/auth-gate.ts -->
+            <div class="relative group ml-1.5">
+                <button id="userMenuChip" onclick="toggleUserMenu()" class="flex items-center cursor-pointer" title="">
+                    <div class="relative">
+                        <img id="userMenuAvatar" src="" alt="" class="hidden w-7 h-7 rounded-full object-cover ring-2 ring-indigo-500/30 hover:ring-indigo-400 transition shadow-sm" />
+                        <div id="userMenuInitial" class="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-semibold ring-2 ring-indigo-500/30 hover:ring-indigo-400 transition shadow-sm">
+                            <span>&nbsp;</span>
+                        </div>
+                        <span class="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 rounded-full ring-2 ring-theta-bg"></span>
+                    </div>
+                </button>
+
+                <!-- User Menu Dropdown -->
+                <div id="userMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-52 bg-theta-panel border border-theta-border rounded-xl shadow-2xl p-2 z-50 text-xs">
+                    <div id="userMenuLabel" class="px-2 py-1.5 text-theta-text font-medium truncate border-b border-theta-border mb-1"></div>
+                    <button id="userMenuSignOutBtn" class="w-full flex items-center gap-2 py-1.5 px-2 rounded-md text-xs font-medium text-theta-text hover:bg-theta-panelHover transition">
+                        <i data-lucide="log-out" class="w-3.5 h-3.5 text-theta-muted"></i>
+                        <span>Sign out</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="flex-1 flex overflow-hidden p-2 gap-0 relative" id="workspaceContainer">
+
+        <!-- ================= LEFT PANEL: File Directory ================= -->
+        <section id="leftPanel" class="workbench-panel flex flex-col h-full overflow-hidden" style="width: 290px; min-width: 210px; max-width: 500px;">
+            <!-- Header with Import/New File Controls -->
+            <div class="h-10 border-b border-theta-border px-3 flex items-center justify-between bg-theta-panel shrink-0 select-none">
+                <div class="flex items-center space-x-2 text-xs font-semibold uppercase tracking-wider text-theta-text">
+                    <i data-lucide="folder-tree" class="w-4 h-4 text-theta-accent"></i>
+                    <span>File Directory</span>
+                </div>
+                <div class="flex items-center space-x-1">
+                    <!-- Import Project Options Dropdown -->
+                    <div class="relative">
+                        <button onclick="toggleImportMenu()" class="p-1 hover:bg-theta-panelHover rounded text-theta-muted hover:text-theta-text flex items-center gap-0.5" title="Import Folder or ZIP Project" aria-label="Import Folder or ZIP Project">
+                            <i data-lucide="file-input" class="w-3.5 h-3.5 text-indigo-400"></i>
+                        </button>
+                        <div id="importMenu" class="hidden absolute left-0 top-full mt-1 w-44 bg-theta-panel border border-theta-border rounded-lg shadow-xl p-1 z-50 text-[11px] space-y-1">
+                            <button onclick="triggerFolderImport()" class="w-full text-left px-2 py-1.5 rounded hover:bg-theta-panelHover flex items-center space-x-2 text-theta-text">
+                                <i data-lucide="folder-up" class="w-3.5 h-3.5 text-amber-400"></i>
+                                <span>Import Folder</span>
+                            </button>
+                            <button onclick="triggerZipImport()" class="w-full text-left px-2 py-1.5 rounded hover:bg-theta-panelHover flex items-center space-x-2 text-theta-text">
+                                <i data-lucide="archive" class="w-3.5 h-3.5 text-indigo-400"></i>
+                                <span>Import .ZIP Project</span>
+                            </button>
+                            <button onclick="triggerFilesImport()" class="w-full text-left px-2 py-1.5 rounded hover:bg-theta-panelHover flex items-center space-x-2 text-theta-text">
+                                <i data-lucide="file-plus-2" class="w-3.5 h-3.5 text-emerald-400"></i>
+                                <span>Import Files</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button onclick="addNewItemToPath(rootProject.id, 'file')" class="p-1 hover:bg-theta-panelHover rounded text-theta-muted hover:text-theta-text" title="New File in Root Project" aria-label="New File in Root Project">
+                        <i data-lucide="file-plus" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button onclick="addNewItemToPath(rootProject.id, 'folder')" class="p-1 hover:bg-theta-panelHover rounded text-theta-muted hover:text-theta-text" title="New Folder in Root Project" aria-label="New Folder in Root Project">
+                        <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button onclick="togglePanel('leftPanel')" class="p-1 hover:bg-theta-panelHover rounded text-theta-muted hover:text-theta-text" title="Collapse Panel" aria-label="Collapse Panel">
+                        <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Hidden File Input Fields for Import -->
+            <input type="file" id="folderImportInput" webkitdirectory directory multiple class="hidden" onchange="handleFolderImport(event)">
+            <input type="file" id="zipImportInput" accept=".zip" class="hidden" onchange="handleZipImport(event)">
+            <input type="file" id="filesImportInput" multiple class="hidden" onchange="handleFilesImport(event)">
+
+            <!-- Directory Search & Filter -->
+            <div class="p-2 border-b border-theta-border bg-theta-bg/50">
+                <div class="relative">
+                    <i data-lucide="filter" class="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-theta-muted"></i>
+                    <input type="text" id="fileSearchInput" oninput="filterFileTree(this.value)" placeholder="Filter files in project..." aria-label="Filter files in project" class="w-full bg-theta-bg border border-theta-border rounded px-2 pl-7 py-1 text-[11px] text-theta-text placeholder-theta-muted focus:outline-none focus:border-theta-accent">
+                </div>
+            </div>
+
+            <!-- Dynamic Interactive Tree View -->
+            <div class="flex-1 overflow-y-auto p-2 text-xs space-y-0.5 select-none" id="fileTreeContainer">
+                <!-- Populated dynamically by renderTree() -->
+            </div>
+
+            <!-- Directory Bottom Status Bar -->
+            <div class="px-3 py-2 border-t border-theta-border bg-theta-panel shrink-0 flex items-center justify-between text-[11px] text-theta-muted">
+                <span class="flex items-center gap-1" id="projectCountLabel">
+                    <i data-lucide="box" class="w-3 h-3 text-emerald-500"></i> Project Ready
+                </span>
+                <span id="autosaveIndicator" class="text-[10px]"></span>
+                <button onclick="openCommitModal()" class="text-[10px] font-mono hover:text-theta-accent flex items-center gap-1" title="Commit current state & view history" aria-label="Commit current state & view history">
+                    <i data-lucide="git-commit-horizontal" class="w-3 h-3"></i> Commit
+                </button>
+                <button onclick="downloadNode(rootProject.id)" class="text-[10px] font-mono hover:text-theta-accent flex items-center gap-1" title="Download Entire Project ZIP" aria-label="Download Entire Project ZIP">
+                    <i data-lucide="download" class="w-3 h-3"></i> Download All
+                </button>
+            </div>
+        </section>
+
+        <!-- Resizer Horizontal 1 -->
+        <div class="resizer-h mx-1 my-1 rounded" id="resizerLeft"></div>
+
+        <!-- ================= CENTER PANEL: Code Editor & Terminal ================= -->
+        <section id="centerPanel" class="flex-1 flex flex-col h-full min-w-[300px] overflow-hidden">
+
+            <!-- Center-Top: Code Editor -->
+            <div id="editorPanel" class="workbench-panel flex-1 flex flex-col overflow-hidden relative" style="min-height: 150px;">
+                
+                <!-- Tab Bar -->
+                <div class="h-10 border-b border-theta-border bg-theta-panel/90 px-2 flex items-center justify-between shrink-0 overflow-x-auto no-scrollbar" id="tabBarContainer">
+                    <div class="flex items-center space-x-1" id="tabList">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+
+                    <div class="flex items-center space-x-2 text-theta-muted shrink-0">
+                        <span id="fileLanguageBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-theta-border/60 text-theta-text">HTML5</span>
+                        <button onclick="runCode()" class="p-1 hover:text-theta-text" title="Run Script / Log Exec" aria-label="Run Script / Log Exec"><i data-lucide="play" class="w-3.5 h-3.5 text-emerald-500"></i></button>
+                        <button onclick="openProjectPreview()" class="p-1 hover:text-theta-text" title="Open generated project preview" aria-label="Open generated project preview"><i data-lucide="external-link" class="w-3.5 h-3.5 text-sky-400"></i></button>
+                        <button onclick="openCustomPortPreview()" class="p-1 hover:text-theta-text" title="Open/attach to a project preview port" aria-label="Open/attach to a project preview port"><i data-lucide="globe-2" class="w-3.5 h-3.5 text-violet-400"></i></button>
+                    </div>
+                </div>
+
+                <!-- Code View -->
+                <div class="flex-1 relative bg-theta-codeBg p-4 overflow-auto font-mono text-xs text-theta-text select-text" id="codeEditorView">
+                    <div class="flex space-x-4 min-w-full">
+                        <div class="select-none text-right text-theta-muted/50 space-y-1 font-mono text-[12px] pr-2 border-r border-theta-border/50" id="editorLineNumbers">
+                            <div>1</div>
+                        </div>
+                        <div class="flex-1 leading-relaxed font-mono text-[12px]" id="editorCodeContent">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resizer Vertical -->
+            <div class="resizer-v my-1 mx-1 rounded" id="resizerVertical"></div>
+
+            <!-- Center-Bottom: Terminal -->
+            <div id="bottomPanel" class="workbench-panel h-48 flex flex-col overflow-hidden relative" style="min-height: 80px; max-height: 600px;">
+                <div class="h-9 border-b border-theta-border bg-theta-panel px-3 flex items-center justify-between shrink-0">
+                    <div class="flex items-center space-x-4 text-xs font-medium">
+                        <button onclick="switchTab('terminal')" id="tab-terminal" class="tab-btn text-theta-text font-semibold border-b-2 border-theta-accent py-2 flex items-center space-x-1.5">
+                            <i data-lucide="terminal" class="w-3.5 h-3.5 text-theta-accent"></i>
+                            <span>Terminal</span>
+                        </button>
+                        <button onclick="switchTab('logs')" id="tab-logs" class="tab-btn text-theta-muted hover:text-theta-text py-2 flex items-center space-x-1.5 relative">
+                            <i data-lucide="list-tree" class="w-3.5 h-3.5"></i>
+                            <span>Logs</span>
+                            <span id="agentActivityDot" class="hidden absolute -top-0.5 -right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        </button>
+                    </div>
+
+                    <div class="flex items-center space-x-2">
+                        <button class="p-1 hover:bg-theta-panelHover rounded text-theta-muted hover:text-theta-text" title="Maximize/Restore" onclick="toggleMaximizeBottom()" aria-label="Maximize/Restore">
+                            <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button class="p-1 hover:bg-theta-panelHover rounded text-theta-muted hover:text-theta-text" title="Close Panel" onclick="togglePanel('bottomPanel')" aria-label="Close Panel">
+                            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex-1 relative bg-theta-terminalBg p-3 font-mono text-[11px] text-theta-terminalText overflow-y-auto" id="terminalOutput">
+                    <div class="space-y-1 text-theta-muted">
+                        <div>Real terminal — waiting for the authenticated CodeSandbox execution environment.</div>
+                        <div class="text-[10px] text-theta-muted">Commands execute in the project's isolated execution environment. stdout/stderr shown here are real command output.</div>
+                    </div>
+                </div>
+                <div id="terminalInputRow" class="hidden shrink-0 flex items-center bg-theta-terminalBg border-t border-theta-border/50 px-3 py-1.5 font-mono text-[11px]">
+                    <span class="text-theta-accent font-bold mr-1.5">➜</span>
+                    <span class="text-cyan-500 font-semibold mr-1.5" id="terminalPromptCwd">~</span>
+                    <input type="text" id="terminalInputField" autocomplete="off" spellcheck="false" class="flex-1 bg-transparent outline-none text-theta-terminalText placeholder-theta-muted/50" placeholder="Run a command..."><button id="terminalStopBtn" type="button" onclick="stopTerminalCommand()" class="hidden shrink-0 ml-2 px-2.5 py-1 rounded-md border border-rose-500/40 bg-rose-500/10 text-rose-300 text-[10px] font-semibold hover:bg-rose-500/20 active:scale-95 transition">Stop</button>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Resizer Horizontal 2 -->
+        <div class="resizer-h mx-1 my-1 rounded" id="resizerRight"></div>
+
+        <!-- ================= RIGHT PANEL: Chat Window ================= -->
+        <section id="rightPanel" class="workbench-panel flex flex-col h-full overflow-hidden" style="width: 360px; min-width: 280px; max-width: 600px;">
+            
+            <div class="h-10 border-b border-theta-border px-2 flex items-center justify-between bg-theta-panel shrink-0 select-none">
+                <div class="flex items-center h-full">
+                    <button id="tab-chief" onclick="switchAgentTab('chief')" class="agent-tab-btn h-full px-3 flex items-center gap-1.5 text-xs font-semibold border-b-2 border-theta-accent text-theta-text">
+                        <i data-lucide="crown" class="w-3.5 h-3.5 text-theta-accent"></i>
+                        <span>Chief</span>
+                    </button>
+                    <button id="tab-miko" onclick="switchAgentTab('miko')" class="agent-tab-btn h-full px-3 flex items-center gap-1.5 text-xs font-semibold border-b-2 border-transparent text-theta-muted hover:text-theta-text">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-pink-400"></i>
+                        <span>Miko</span>
+                    </button>
+                </div>
+                <div class="flex items-center space-x-1">
+                    <button onclick="clearChat()" class="p-1 hover:bg-theta-panelHover rounded text-theta-muted hover:text-theta-text" title="Clear History" aria-label="Clear History">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button onclick="togglePanel('rightPanel')" class="p-1 hover:bg-theta-panelHover rounded text-theta-muted hover:text-theta-text" title="Collapse Panel" aria-label="Collapse Panel">
+                        <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Blueprint / Step Progress Panel (Chief tab only, shown once a blueprint exists) -->
+            <div id="blueprintPanel" class="hidden border-b border-theta-border bg-theta-panel/60 shrink-0 max-h-64 overflow-y-auto">
+                <div class="p-2 space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-[11px] font-semibold uppercase tracking-wider text-theta-muted flex items-center gap-1.5">
+                            <i data-lucide="list-checks" class="w-3.5 h-3.5 text-theta-accent"></i> Project Blueprint
+                        </span>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button id="blueprintPauseBtn" onclick="pauseBlueprintProject()" title="Pause after the current step. Once paused, choose to resume as-planned or replan from your discussion — see the panel below the chat." class="hidden text-[10px] font-medium text-amber-400 hover:text-amber-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1">
+                                <i data-lucide="pause-circle" class="w-3 h-3"></i> Pause
+                            </button>
+                            <button onclick="cancelBlueprintProject()" class="text-[10px] font-medium text-red-400 hover:text-red-300 flex items-center gap-1">
+                                <i data-lucide="x-circle" class="w-3 h-3"></i> Cancel & Revert
+                            </button>
+                        </div>
+                    </div>
+                    <div id="blueprintSteps" class="space-y-1.5"></div>
+                    <p id="blueprintDoneMsg" class="hidden text-[10px] text-emerald-400 text-center py-1">All steps complete — download or commit when ready.</p>
+                </div>
+            </div>
+
+            <!-- Messages Container -->
+            <div id="chatMessages" class="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-4 text-xs min-w-0 max-w-full">
+            </div>
+
+            <!-- Contextual Blueprint Action Dock: only appears when Chief needs an explicit execution decision or the blueprint is paused. -->
+            <div id="blueprintActionDock" class="hidden px-3 pt-2 bg-theta-panel shrink-0">
+                <div id="chatBlueprintDecisionControls" class="hidden rounded-xl border border-theta-accent/30 bg-theta-accent/5 p-2.5 space-y-2 shadow-sm">
+                    <div class="flex items-start gap-2">
+                        <i data-lucide="clipboard-check" class="w-4 h-4 text-theta-accent mt-0.5 shrink-0"></i>
+                        <div class="min-w-0">
+                            <div class="text-[11px] font-semibold text-theta-text">Blueprint ready</div>
+                            <div class="text-[10px] text-theta-muted">Review the plan above, then choose how Theta should execute it. Nothing runs until you choose.</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                        <button onclick="acceptBlueprintAutopilot()" class="py-2 px-2 rounded-md bg-theta-accent hover:bg-theta-accentHover text-white text-[10px] font-semibold transition flex items-center justify-center gap-1.5"><i data-lucide="play" class="w-3 h-3"></i> Accept &amp; Run Auto-pilot</button>
+                        <button onclick="acceptBlueprintManual()" class="py-2 px-2 rounded-md border border-theta-border hover:border-theta-accent/60 text-theta-text text-[10px] font-semibold transition flex items-center justify-center gap-1.5"><i data-lucide="step-forward" class="w-3 h-3"></i> Confirm Each Step</button>
+                        <button onclick="cancelBlueprintDraft()" class="py-2 px-2 rounded-md border border-red-500/30 hover:border-red-500/60 text-red-300 text-[10px] font-semibold transition flex items-center justify-center gap-1.5"><i data-lucide="x" class="w-3 h-3"></i> Cancel Draft</button>
+                    </div>
+                </div>
+                <div id="chatBlueprintNextControls" class="hidden rounded-xl border border-theta-border bg-theta-bg p-2 space-y-2 shadow-sm">
+                    <div class="text-[10px] text-theta-muted">Manual mode — the next step is waiting for your approval.</div>
+                    <button id="blueprintRunNextBtn" onclick="runNextBlueprintStep()" class="w-full py-2 rounded-md bg-theta-accent hover:bg-theta-accentHover text-white text-[10px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"><i data-lucide="step-forward" class="w-3 h-3 inline mr-1"></i>Approve &amp; Run Next Step</button>
+                </div>
+                <div id="chatBlueprintPausedControls" class="hidden rounded-xl border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2 shadow-sm">
+                    <div class="flex items-start gap-2">
+                        <i data-lucide="pause-circle" class="w-4 h-4 text-amber-400 mt-0.5 shrink-0"></i>
+                        <div class="min-w-0">
+                            <div class="text-[11px] font-semibold text-theta-text">Blueprint paused</div>
+                            <div class="text-[10px] text-theta-muted">Completed steps stay untouched. Discuss changes with Chief in chat, then pick one:</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        <button onclick="resumeBlueprintProject()" class="py-1.5 rounded-md bg-theta-accent hover:bg-theta-accentHover text-white text-[10px] font-semibold" title="Continue the remaining steps exactly as originally planned."><i data-lucide="play" class="w-3 h-3 inline mr-1"></i>Resume As Planned</button>
+                        <button onclick="updateBlueprintFromDiscussion()" class="py-1.5 rounded-md border border-theta-border hover:border-theta-accent/60 text-theta-text text-[10px] font-semibold" title="Regenerate only the remaining steps using what you just discussed with Chief."><i data-lucide="route" class="w-3 h-3 inline mr-1"></i>Replan Remaining Steps</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Input Bar -->
+            <div class="p-3 bg-theta-panel border-t border-theta-border shrink-0">
+                <div class="flex items-center justify-between mb-1.5 px-0.5">
+                    <span id="agentTabHint" class="text-[10px] text-theta-muted">Chief plans and edits live in the workspace — describe a project, or just ask for a specific change.</span>
+
+                </div>
+                <div class="bg-theta-bg border border-theta-border rounded-xl p-2 focus-within:border-theta-accent transition-all shadow-inner relative">
+                    <div id="attachmentChips" class="hidden flex flex-wrap gap-1 pb-1.5 mb-1.5 border-b border-theta-border/40"></div>
+
+                    <textarea 
+                        id="chatInput" 
+                        rows="2" 
+                        placeholder="Ask Theta AI or request refactoring... (@ to reference)" 
+                        class="w-full bg-transparent text-xs text-theta-text placeholder-theta-muted focus:outline-none resize-none px-1"
+                        onkeydown="handleKeyDown(event)"
+                        oninput="handleChatInputTyping(this)"
+                    ></textarea>
+
+                    <div id="mentionPicker" class="hidden absolute bottom-full left-2 right-2 mb-1 bg-theta-panel border border-theta-border rounded-md shadow-2xl max-h-48 overflow-y-auto z-40"></div>
+
+                    <div class="flex items-center justify-between pt-1 border-t border-theta-border/40 mt-1">
+                        <div class="flex items-center space-x-1.5">
+                            <button 
+                                type="button"
+                                onclick="triggerAttachment()" 
+                                title="Attach Code/File" 
+                                class="px-2 py-1 text-[11px] font-medium text-theta-muted hover:text-theta-text bg-theta-panel rounded-md transition flex items-center space-x-1 border border-theta-border hover:border-theta-accent/50"
+                            >
+                                <i data-lucide="paperclip" class="w-3.5 h-3.5 text-indigo-500"></i>
+                                <span>Attach</span>
+                            </button>
+                            
+                            <button 
+                                type="button"
+                                onclick="toggleMentionPicker()" 
+                                title="Reference a project file" 
+                                class="px-2 py-1 text-[11px] font-medium text-theta-muted hover:text-theta-text bg-theta-panel rounded-md transition flex items-center space-x-1 border border-theta-border hover:border-theta-accent/50"
+                            >
+                                <span class="font-semibold text-indigo-500 text-xs">@</span>
+                                <span>Reference</span>
+                            </button>
+                            <input type="file" id="fileInput" multiple class="hidden" onchange="handleFileSelect(event)">
+                        </div>
+
+                        <div>
+                            <button 
+                                id="sendBtn" 
+                                onclick="handleSendOrStop()" 
+                                title="Send Message" 
+                                class="flex items-center space-x-1.5 px-3 py-1.5 bg-theta-accent hover:bg-theta-accentHover text-white rounded-lg text-xs font-medium transition shadow-md shadow-theta-accent/20 active:scale-95"
+                            >
+                                <span>Send</span>
+                                <i data-lucide="send" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    </div> <!-- /#workspaceShell -->
+
+    <!-- Non-blocking Custom Dialog / Toast Container -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+    <!-- Custom Non-Blocking Input Modal -->
+    <div id="customModal" class="hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-theta-panel border border-theta-border rounded-xl shadow-2xl p-4 w-full max-w-sm space-y-3">
+            <h3 id="modalTitle" class="text-sm font-semibold text-theta-text">Prompt</h3>
+            <p id="modalDesc" class="text-xs text-theta-muted">Please enter value:</p>
+            <input type="text" id="modalInput" class="w-full bg-theta-bg border border-theta-border rounded-lg px-3 py-1.5 text-xs text-theta-text focus:outline-none focus:border-theta-accent">
+            <div class="flex justify-end space-x-2 pt-2">
+                <button onclick="closeModal(false)" class="px-3 py-1.5 rounded-md text-xs text-theta-muted hover:text-theta-text bg-theta-bg border border-theta-border">Cancel</button>
+                <button onclick="closeModal(true)" class="px-3 py-1.5 rounded-md text-xs text-white bg-theta-accent hover:bg-theta-accentHover">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Commit History / Restore Modal -->
+    <div id="commitModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-theta-panel border border-theta-border rounded-xl shadow-2xl p-4 w-full max-w-md space-y-3 text-xs max-h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between border-b border-theta-border pb-2 shrink-0">
+                <h3 class="font-semibold text-theta-text flex items-center gap-2 text-sm">
+                    <i data-lucide="git-commit-horizontal" class="w-4 h-4 text-theta-accent"></i> Commits
+                </h3>
+                <button onclick="closeCommitModal()" class="text-theta-muted hover:text-theta-text">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+
+            <div class="flex items-center space-x-2 shrink-0">
+                <input type="text" id="commitMessageInput" placeholder="Commit message (e.g. 'Working header layout')" class="flex-1 bg-theta-bg border border-theta-border rounded-md px-2.5 py-1.5 text-theta-text focus:outline-none focus:border-theta-accent">
+                <button onclick="createManualCommit()" class="px-3 py-1.5 rounded-md text-white bg-theta-accent hover:bg-theta-accentHover font-medium shrink-0">Commit</button>
+            </div>
+
+            <p class="text-[10px] text-theta-muted shrink-0">Every commit snapshots the whole project. Restoring replaces your current files with that snapshot (this itself creates an auto-commit first, so you can always undo a restore too).</p>
+
+            <div id="commitList" class="space-y-1.5 overflow-y-auto flex-1 border-t border-theta-border pt-2">
+                <div class="text-theta-muted text-center py-4">Loading commits…</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File-by-file Diff Modal (Phase 4) — shared by the blueprint panel's "View Diff" and the commit history's "Diff" button -->
+    <div id="diffModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-theta-panel border border-theta-border rounded-xl shadow-2xl p-4 w-full max-w-2xl space-y-3 text-xs max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between border-b border-theta-border pb-2 shrink-0">
+                <h3 id="diffModalTitle" class="font-semibold text-theta-text flex items-center gap-2 text-sm truncate">
+                    <i data-lucide="file-diff" class="w-4 h-4 text-theta-accent shrink-0"></i> <span class="truncate">Diff</span>
+                </h3>
+                <button onclick="closeDiffModal()" class="text-theta-muted hover:text-theta-text shrink-0">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div id="diffModalBody" class="space-y-2 overflow-y-auto flex-1">
+                <div class="text-theta-muted text-center py-4">Loading diff…</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Central Dynamic Project Root Data Structure.
+        // IMPORTANT: this is declared with `var` (not `let`) on purpose — at the top level of a
+        // classic <script>, `var` attaches directly to `window`, so `window.rootProject` (read/written
+        // by the TS agent runtime in src/) and the bare `rootProject` used throughout this script are
+        // the exact same binding. With `let` they would silently diverge and agent file writes would
+        // never appear in the editor/file tree.
+        var rootProject = {
+            id: 'root-proj',
+            name: 'my-theta-app',
+            type: 'folder',
+            expanded: true,
+            children: [
+             /*   {
+                    id: 'f-src',
+                    name: 'src',
+                    type: 'folder',
+                    expanded: true,
+                    children: [
+                        {
+                            id: 'file-header',
+                            name: 'Header.jsx',
+                            type: 'file',
+                            language: 'React JSX',
+                            content: 'import React from "react";\n\nexport default function Header() {\n  return (\n    <header className="flex items-center justify-between p-4 bg-slate-900">\n      <h1 className="text-lg font-bold text-white">Theta Workbench</h1>\n    </header>\n  );\n}'
+                        },
+                        {
+                            id: 'file-sidebar',
+                            name: 'Sidebar.jsx',
+                            type: 'file',
+                            language: 'React JSX',
+                            content: 'import React from "react";\n\nexport function Sidebar({ isOpen }) {\n  return (\n    <aside className="w-64 bg-zinc-900">\n      <nav>Sidebar Directory Navigation</nav>\n    </aside>\n  );\n}'
+                        }
+                    ]
+                },
+                {
+                    id: 'f-public',
+                    name: 'public',
+                    type: 'folder',
+                    expanded: true,
+                    children: [
+                        {
+                            id: 'file-index-html',
+                            name: 'index.html',
+                            type: 'file',
+                            language: 'HTML5',
+                            content: '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <title>Theta Workbench App</title>\n</head>\n<body>\n  <div id="app"></div>\n
+<script>
+(function () {
+  // Truthful execution telemetry: these events come from actual dispatch/tool boundaries,
+  // not from optimistic UI state. The UI can display them wherever the Logs renderer exists.
+  window.__thetaExecutionTruth = window.__thetaExecutionTruth || [];
+  window.addEventListener('theta:execution-truth', function (event) {
+    if (!event.detail) return;
+    window.__thetaExecutionTruth.push(event.detail);
+    window.dispatchEvent(new CustomEvent('theta:logs-refresh', { detail: event.detail }));
+  });
+})();
+<\/script>
+
+
+<script>
+window.addEventListener('theta:persistence', (e) => {
+  const s = e?.detail?.status;
+  if (s === 'degraded' || s === 'healthy') window.setPersistenceStatus?.(s);
+});
+<\/script>
+
+</body>\n</html>'
+                        }
+                    ]
+                },
+                {
+                    id: 'file-package-json',
+                    name: 'package.json',
+                    type: 'file',
+                    language: 'JSON',
+                    content: '{\n  "name": "my-theta-app",\n  "version": "1.0.0",\n  "scripts": {\n    "dev": "vite"\n  }\n}'
+                },
+                {
+                    id: 'file-readme',
+                    name: 'README.md',
+                    type: 'file',
+                    language: 'Markdown',
+                    content: '# my-theta-app\nCreated in Theta Workbench.'
+                }*/
+                {
+                        id: 'file-Welcome',
+                        name: 'Welcome.md',
+                        type: 'file',
+                        language: 'Markdown',
+                        content: '# ⚡ THETA WORKBENCH\n\nA modern, high-performance creative workspace and multi-agent autonomous coding suite.\n\n---\n\n### 🚀 Key Features\n `src/` — Core components & agent orchestration\n `public/` — Assets and application entry points\n `Chief & Miko` — Autonomous ReAct workflows running in dedicated separate tabs, each backed automatically by the right Gemini or OpenRouter model for the job\n `Workspace Access` — Direct file reading, editing, creation, active `@` context, and file attachments\n `Cloud Sync & Persistence` — Supabase autosave and state hydration to prevent data loss on refresh\n `Version Control` — Commit history tracking with snapshot restoration\n \n ### 🌐 For more information visit the [Main Page].\n\nBuilt by Navneet (https://instagram.com/oneinagoogolplex._) on Theta Engine.'
+                }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+            ]
+        };
+
+        let openTabs = [];
+        let activeFileId = 'file-Welcome';
+        let activeTheme = 'dark';
+        const THEME_STORAGE_KEY = 'theta.ui.theme';
+        let isGenerating = false;
+        let activeStreamInterval = null;
+        let generationRunId = 0;
+        let isBottomMaximized = false;
+        let currentConnectionStatus = 'connected';
+        let modalResolver = null;
+
+        function applyPersistedTheme() {
+            try {
+                const stored = localStorage.getItem(THEME_STORAGE_KEY);
+                if (stored === 'light' || stored === 'dark') setTheme(stored, false);
+                else setTheme('dark', false);
+            } catch { setTheme('dark', false); }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            applyPersistedTheme();
+            if (window.lucide) lucide.createIcons();
+            initResizers();
+            restorePanelVisibility();
+            openTabs = ['file-index-html', 'file-header', 'file-package-json'];
+            renderFileTree();
+            switchToFile(activeFileId);
+            renderInitialMessages();
+            initGlobalSearch();
+            initCommitUI();
+            initTerminalShell();
+            initChatAttachmentsAndMentions();
+        });
+
+        // ---- Autosave / restore-on-refresh --------------------------------------------------
+        // Debounced save of the *entire* project tree to Supabase (falls back to localStorage
+        // automatically inside vfsSync if Supabase isn't configured). Called any time rootProject
+        // changes: agent writes (via FileSystemTools), manual file edits, add/rename/delete, imports.
+        let _autosaveTimer = null;
+        let _autosaveProjectId = null;
+        function scheduleWorkspaceAutosave(immediate) {
+            if (!window.vfsSync || !window.activeProject?.id) return;
+            _autosaveProjectId = window.activeProject.id;
+            if (_autosaveTimer) clearTimeout(_autosaveTimer);
+            const projectIdAtSchedule = _autosaveProjectId;
+            const run = () => {
+                _autosaveTimer = null;
+                if (!window.vfsSync || window.activeProject?.id !== projectIdAtSchedule) return;
+                const save = window.vfsSync.saveWorkspaceSnapshot(rootProject);
+                save.then(() => {
+                    if (window.activeProject?.id === projectIdAtSchedule) {
+                        setAutosaveIndicator('saved');
+                        window.touchActiveProject?.(projectIdAtSchedule);
+                    }
+                }).catch(() => setAutosaveIndicator('error'));
+            };
+            setAutosaveIndicator('saving');
+            if (immediate) run();
+            else _autosaveTimer = setTimeout(run, 1200);
+        }
+        function cancelWorkspaceAutosave() {
+            if (_autosaveTimer) clearTimeout(_autosaveTimer);
+            _autosaveTimer = null;
+            _autosaveProjectId = null;
+        }
+        async function flushWorkspaceAutosaveForProject(projectId) {
+            if (!_autosaveTimer || _autosaveProjectId !== projectId || !window.vfsSync) return;
+            clearTimeout(_autosaveTimer);
+            _autosaveTimer = null;
+            const promise = window.vfsSync.projectId === projectId
+                ? window.vfsSync.saveWorkspaceSnapshot(rootProject)
+                : Promise.resolve();
+            await promise;
+        }
+        window.scheduleWorkspaceAutosave = scheduleWorkspaceAutosave;
+        window.cancelWorkspaceAutosave = cancelWorkspaceAutosave;
+        window.flushWorkspaceAutosaveForProject = flushWorkspaceAutosaveForProject;
+        window.scheduleWorkspaceAutosave = scheduleWorkspaceAutosave;
+
+        window.touchActiveProject = function(projectId) {
+            if (!projectId || window.activeProject?.id !== projectId) return Promise.resolve();
+            return window.thetaTouchProjectUpdatedAt(projectId);
+        };
+
+        function setAutosaveIndicator(state) {
+            const el = document.getElementById('autosaveIndicator');
+            if (!el) return;
+            if (state === 'saving') {
+                el.textContent = 'Saving…';
+                el.className = 'text-[10px] text-amber-400';
+            } else if (state === 'saved') {
+                el.textContent = 'Saved to cloud';
+                el.className = 'text-[10px] text-emerald-400';
+                clearTimeout(el._fadeTimer);
+                el._fadeTimer = setTimeout(() => { el.textContent = ''; }, 2000);
+            } else {
+                el.textContent = 'Save failed (offline?)';
+                el.className = 'text-[10px] text-rose-400';
+            }
+        }
+
+        // Called by the TS agent runtime after an agent writes a file, so the editor pane
+        // reflects the change immediately if that file happens to be open.
+        function refreshActiveFileIfMatches(filePath) {
+            const node = findNodeById(rootProject, activeFileId);
+            if (!node) return;
+            const fileName = String(filePath).split('/').pop();
+            if (node.name === filePath || node.name === fileName) {
+                switchToFile(activeFileId);
+            }
+        }
+        window.refreshActiveFileIfMatches = refreshActiveFileIfMatches;
+
+        // Called after a commit restore or rollback replaces the whole tree — open tabs may
+        // reference node ids that no longer exist in the restored tree.
+        function refreshOpenTabsAfterRestore() {
+            openTabs = openTabs.filter((id) => findNodeById(rootProject, id));
+            if (!activeFileId || !findNodeById(rootProject, activeFileId)) {
+                const first = findFirstFile(rootProject);
+                activeFileId = first ? first.id : null;
+                if (activeFileId && !openTabs.includes(activeFileId)) openTabs.push(activeFileId);
+            }
+            renderFileTree();
+            renderTabBar();
+            if (activeFileId) {
+                switchToFile(activeFileId);
+            } else {
+                document.getElementById('editorCodeContent').innerHTML = '';
+                document.getElementById('editorLineNumbers').innerHTML = '';
+            }
+        }
+        window.refreshOpenTabsAfterRestore = refreshOpenTabsAfterRestore;
+
+        // On boot, try to restore the last-saved project so a refresh never wipes real work.
+        // Runs async and, whichever way the module-vs-DOMContentLoaded race goes, always applies
+        // last (it simply re-renders on top of whatever the default boot already drew).
+        async function restoreWorkspaceOnBoot() {
+            if (!window.vfsSync || !window.activeProject?.id) return;
+            try {
+                // Always reset before hydration so switching to a project with no snapshot
+                // cannot inherit the previously active project's in-memory tree.
+                rootProject = {
+                    id: 'root-proj',
+                    name: window.activeProject.name,
+                    type: 'folder',
+                    expanded: true,
+                    children: [{
+                        id: 'file-Welcome',
+                        name: 'Welcome.md',
+                        type: 'file',
+                        language: 'Markdown',
+                        content: '# ⚡ THETA WORKBENCH\n\nA fresh project workspace.'
+                    }]
+                };
+                window.rootProject = rootProject;
+                openTabs = [];
+                activeFileId = 'file-Welcome';
+
+                const snapshot = await window.vfsSync.loadWorkspaceSnapshot();
+                if (snapshot && snapshot.id && snapshot.children) {
+                    rootProject = snapshot;
+                    window.rootProject = rootProject;
+                    refreshOpenTabsAfterRestore();
+                    showToast('Restored your saved workspace.', 'success');
+                } else {
+                    renderFileTree();
+                    renderTabBar();
+                    switchToFile(activeFileId);
+                }
+            } catch (err) {
+                console.warn('[Theta] Workspace restore failed:', err);
+                renderFileTree();
+                renderTabBar();
+            }
+        }
+        window.restoreWorkspaceOnBoot = restoreWorkspaceOnBoot;
+        // Phase 3: workspace hydration is triggered by setActiveProject() after a real project is opened.
+
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            if (!container) return;
+
+            const toast = document.createElement('div');
+            toast.className = `pointer-events-auto px-3 py-2 rounded-lg text-xs font-medium shadow-xl border flex items-center gap-2 transition-all duration-300 transform translate-y-2 opacity-0 ${
+                type === 'error' ? 'bg-rose-950/90 text-rose-200 border-rose-800/50' : 
+                type === 'success' ? 'bg-emerald-950/90 text-emerald-200 border-emerald-800/50' : 
+                'bg-theta-panel text-theta-text border-theta-border'
+            }`;
+            toast.innerHTML = `<span>${message}</span>`;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function promptModal(title, defaultValue = '') {
+            return new Promise((resolve) => {
+                modalResolver = resolve;
+                const modal = document.getElementById('customModal');
+                const titleEl = document.getElementById('modalTitle');
+                const inputEl = document.getElementById('modalInput');
+
+                if (titleEl) titleEl.innerText = title;
+                if (inputEl) {
+                    inputEl.value = defaultValue;
+                    setTimeout(() => inputEl.focus(), 50);
+                }
+                if (modal) modal.classList.remove('hidden');
+            });
+        }
+
+        function closeModal(confirmed) {
+            const modal = document.getElementById('customModal');
+            const inputEl = document.getElementById('modalInput');
+            if (modal) modal.classList.add('hidden');
+
+            if (modalResolver) {
+                modalResolver(confirmed ? inputEl.value : null);
+                modalResolver = null;
+            }
+        }
+
+        // Toggle Import Dropdown
+        function toggleImportMenu() {
+            const menu = document.getElementById('importMenu');
+            if (menu) menu.classList.toggle('hidden');
+        }
+
+        // Close menus when clicking outside
+        document.addEventListener('click', (e) => {
+            const importMenu = document.getElementById('importMenu');
+            const settingsMenu = document.getElementById('settingsMenu');
+            if (importMenu && !importMenu.contains(e.target) && !e.target.closest('button[onclick="toggleImportMenu()"]')) {
+                importMenu.classList.add('hidden');
+            }
+            if (settingsMenu && !settingsMenu.contains(e.target) && !e.target.closest('#settingsBtn')) {
+                settingsMenu.classList.add('hidden');
+            }
+            const userMenuDropdown = document.getElementById('userMenuDropdown');
+            if (userMenuDropdown && !userMenuDropdown.contains(e.target) && !e.target.closest('#userMenuChip')) {
+                userMenuDropdown.classList.add('hidden');
+            }
+        });
+
+        // Find item helper recursively
+        function findNodeById(node, id) {
+            if (node.id === id) return node;
+            if (node.children) {
+                for (let child of node.children) {
+                    let found = findNodeById(child, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        // Find parent helper recursively
+        function findParentNode(parent, id) {
+            if (parent.children) {
+                for (let child of parent.children) {
+                    if (child.id === id) return parent;
+                    let found = findParentNode(child, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        function renderFileTree() {
+            const container = document.getElementById('fileTreeContainer');
+            if (!container) return;
+            container.innerHTML = renderNodeHtml(rootProject, true);
+            if (window.lucide) lucide.createIcons();
+
+            // Update terminal project label
+            const termProj = document.getElementById('terminalProjectName');
+            if (termProj) termProj.innerText = rootProject.name;
+        }
+
+        function renderNodeHtml(node, isRoot = false) {
+            const isFolder = node.type === 'folder';
+            const isActive = node.id === activeFileId;
+
+            if (isFolder) {
+                const iconColor = isRoot ? 'text-indigo-500 fill-indigo-500/20' : 'text-amber-400 fill-amber-400/20';
+                
+                let childrenHtml = '';
+                if (node.expanded && node.children) {
+                    childrenHtml = node.children.map(child => renderNodeHtml(child)).join('');
+                }
+
+                return `
+                    <div class="folder-group my-0.5">
+                        <div class="file-item flex items-center justify-between py-1 px-1.5 rounded cursor-pointer group ${isRoot ? 'font-semibold text-theta-text bg-theta-panel border border-theta-border/60 shadow-sm' : ''}">
+                            <div class="flex items-center space-x-1.5 min-w-0 flex-1" onclick="toggleFolderNode('${node.id}')">
+                                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-theta-muted transition-transform shrink-0 ${node.expanded ? '' : '-rotate-90'}"></i>
+                                <i data-lucide="${isRoot ? 'box' : 'folder'}" class="w-4 h-4 ${iconColor} shrink-0"></i>
+                                <span class="truncate text-[12px]">${node.name}</span>
+                            </div>
+
+                            <div class="action-btn-group flex items-center space-x-1 text-theta-muted shrink-0">
+                                <button onclick="addNewItemToPath('${node.id}', 'file')" class="p-0.5 hover:text-emerald-400 rounded" title="Add file here" aria-label="Add file here"><i data-lucide="file-plus" class="w-3 h-3"></i></button>
+                                <button onclick="addNewItemToPath('${node.id}', 'folder')" class="p-0.5 hover:text-amber-400 rounded" title="Add folder here" aria-label="Add folder here"><i data-lucide="folder-plus" class="w-3 h-3"></i></button>
+                                <button onclick="downloadNode('${node.id}')" class="p-0.5 hover:text-indigo-400 rounded" title="Download ZIP" aria-label="Download ZIP"><i data-lucide="download" class="w-3 h-3"></i></button>
+                                <button onclick="renameNode('${node.id}')" class="p-0.5 hover:text-sky-400 rounded" title="Rename" aria-label="Rename"><i data-lucide="pencil" class="w-3 h-3"></i></button>
+                                ${!isRoot ? `<button onclick="deleteNode('${node.id}')" class="p-0.5 hover:text-rose-400 rounded" title="Delete"><i data-lucide="trash-2" class="w-3 h-3"></i></button>` : ''} aria-label="Delete"
+                            </div>
+                        </div>
+                        <div class="pl-3.5 space-y-0.5 ${node.expanded ? '' : 'hidden'}">
+                            ${childrenHtml}
+                        </div>
+                    </div>
+                `;
+            } else {
+                let fileIcon = 'file-code';
+                let fileColor = 'text-sky-400';
+                if (node.name.endsWith('.html')) { fileIcon = 'code-2'; fileColor = 'text-amber-500'; }
+                else if (node.name.endsWith('.css')) { fileIcon = 'file-code'; fileColor = 'text-cyan-400'; }
+                else if (node.name.endsWith('.js') || node.name.endsWith('.jsx')) { fileIcon = 'atom'; fileColor = 'text-sky-400'; }
+                else if (node.name.endsWith('.json')) { fileIcon = 'braces'; fileColor = 'text-emerald-400'; }
+
+                return `
+                    <div class="file-item file-node ${isActive ? 'active' : ''} flex items-center justify-between py-1 px-1.5 rounded cursor-pointer group" onclick="switchToFile('${node.id}')">
+                        <div class="flex items-center space-x-2 min-w-0 flex-1">
+                            <i data-lucide="${fileIcon}" class="w-3.5 h-3.5 ${fileColor} shrink-0"></i>
+                            <span class="truncate text-[11px]">${node.name}</span>
+                        </div>
+
+                        <div class="action-btn-group flex items-center space-x-1 text-theta-muted shrink-0">
+                            <button onclick="event.stopPropagation(); downloadNode('${node.id}')" class="p-0.5 hover:text-indigo-400 rounded" title="Download File" aria-label="Download File"><i data-lucide="download" class="w-3 h-3"></i></button>
+                            <button onclick="event.stopPropagation(); renameNode('${node.id}')" class="p-0.5 hover:text-sky-400 rounded" title="Rename" aria-label="Rename"><i data-lucide="pencil" class="w-3 h-3"></i></button>
+                            <button onclick="event.stopPropagation(); deleteNode('${node.id}')" class="p-0.5 hover:text-rose-400 rounded" title="Delete" aria-label="Delete"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Folder Toggle
+        function toggleFolderNode(id) {
+            const node = findNodeById(rootProject, id);
+            if (node) {
+                node.expanded = !node.expanded;
+                renderFileTree();
+            }
+        }
+
+        // Rename Node
+        async function renameNode(id) {
+            const node = findNodeById(rootProject, id);
+            if (!node) return;
+            const newName = await promptModal(`Rename ${node.type}:`, node.name);
+            if (newName && newName.trim() !== '') {
+                node.name = newName.trim();
+                renderFileTree();
+                renderTabBar();
+                scheduleWorkspaceAutosave();
+                showToast(`Renamed to "${node.name}"`, 'success');
+            }
+        }
+
+        // Delete Node
+        async function deleteNode(id) {
+            if (id === rootProject.id) return;
+            const node = findNodeById(rootProject, id);
+            if (!node) return;
+            
+            const parent = findParentNode(rootProject, id);
+            if (parent && parent.children) {
+                parent.children = parent.children.filter(c => c.id !== id);
+            }
+            openTabs = openTabs.filter(tabId => tabId !== id);
+            if (activeFileId === id) {
+                activeFileId = openTabs.length > 0 ? openTabs[0] : null;
+            }
+            renderFileTree();
+            renderTabBar();
+            if (activeFileId) switchToFile(activeFileId);
+            scheduleWorkspaceAutosave();
+            showToast(`Deleted ${node.name}`, 'info');
+        }
+
+        async function addNewItemToPath(parentId, type) {
+            const parent = findNodeById(rootProject, parentId) || rootProject;
+            if (parent.type !== 'folder') return;
+
+            const name = await promptModal(`Enter new ${type} name:`, type === 'file' ? 'NewFile.js' : 'new-folder');
+            if (name && name.trim() !== '') {
+                const newItem = {
+                    id: 'node_' + Math.random().toString(36).substr(2, 9),
+                    name: name.trim(),
+                    type: type,
+                    ...(type === 'folder' ? { expanded: true, children: [] } : { language: 'Custom', content: `// ${name.trim()}\n` })
+                };
+                parent.children.push(newItem);
+                parent.expanded = true;
+                if (type === 'file') {
+                    if (!openTabs.includes(newItem.id)) openTabs.push(newItem.id);
+                    activeFileId = newItem.id;
+                }
+                renderFileTree();
+                renderTabBar();
+                if (type === 'file') switchToFile(newItem.id);
+                scheduleWorkspaceAutosave();
+                showToast(`Created ${name.trim()}`, 'success');
+            }
+        }
+
+        // Download single file or zip folder dynamically
+        function downloadNode(id) {
+            const node = findNodeById(rootProject, id);
+            if (!node) return;
+
+            if (node.type === 'file') {
+                const blob = new Blob([node.content || ''], { type: 'text/plain;charset=utf-8' });
+                saveAs(blob, node.name);
+                showToast(`Downloaded ${node.name}`, 'success');
+            } else {
+                const zip = new JSZip();
+                
+                function addFolderToZip(folderNode, zipFolder) {
+                    if (!folderNode.children) return;
+                    folderNode.children.forEach(child => {
+                        if (child.type === 'file') {
+                            zipFolder.file(child.name, child.content || '');
+                        } else if (child.type === 'folder') {
+                            const subFolder = zipFolder.folder(child.name);
+                            addFolderToZip(child, subFolder);
+                        }
+                    });
+                }
+
+                const rootZipFolder = zip.folder(node.name);
+                addFolderToZip(node, rootZipFolder);
+
+                zip.generateAsync({ type: 'blob' }).then(content => {
+                    saveAs(content, `${node.name}.zip`);
+                    showToast(`Downloaded ${node.name}.zip`, 'success');
+                });
+            }
+        }
+
+        // Project Import Helpers
+        function triggerFolderImport() {
+            document.getElementById('folderImportInput').click();
+            document.getElementById('importMenu').classList.add('hidden');
+        }
+
+        function triggerZipImport() {
+            document.getElementById('zipImportInput').click();
+            document.getElementById('importMenu').classList.add('hidden');
+        }
+
+        function triggerFilesImport() {
+            document.getElementById('filesImportInput').click();
+            document.getElementById('importMenu').classList.add('hidden');
+        }
+
+        function importedLanguageForName(name) {
+            const ext = String(name).toLowerCase().split('.').pop();
+            const map = { js: 'JavaScript', jsx: 'React JSX', ts: 'TypeScript', tsx: 'React TSX', html: 'HTML5', css: 'CSS', json: 'JSON', md: 'Markdown', py: 'Python', java: 'Java', cpp: 'C++', c: 'C', h: 'C/C++ Header', rs: 'Rust', go: 'Go', sh: 'Shell', yaml: 'YAML', yml: 'YAML', xml: 'XML', svg: 'SVG' };
+            return map[ext] || 'Plain';
+        }
+
+        function isTextLikeFile(file) {
+            if (file.type && file.type.startsWith('text/')) return true;
+            return /\.(js|jsx|ts|tsx|html|css|json|md|txt|py|java|cpp|c|h|rs|go|sh|yaml|yml|xml|svg|sql|graphql|vue|svelte)$/i.test(file.name);
+        }
+
+        async function handleFilesImport(event) {
+            const files = Array.from(event.target.files || []);
+            event.target.value = '';
+            if (!files.length) return;
+            const parent = activeFileId ? findParentNode(rootProject, activeFileId) : null;
+            const target = parent && parent.type === 'folder' ? parent : rootProject;
+            let imported = 0;
+            for (const file of files) {
+                let content;
+                if (isTextLikeFile(file)) {
+                    content = await file.text();
+                } else {
+                    const bytes = new Uint8Array(await file.arrayBuffer());
+                    let binary = '';
+                    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+                    content = `data:${file.type || 'application/octet-stream'};base64,${btoa(binary)}`;
+                }
+                target.children.push({ id: 'imported_file_' + Math.random().toString(36).slice(2, 11), name: file.name, type: 'file', language: importedLanguageForName(file.name), content });
+                imported++;
+            }
+            target.expanded = true;
+            renderFileTree();
+            renderTabBar();
+            scheduleWorkspaceAutosave(true);
+            showToast(`${imported} file${imported === 1 ? '' : 's'} imported.`, 'success');
+        }
+
+        // Handle Import Folder from PC
+        function handleFolderImport(event) {
+            const files = Array.from(event.target.files);
+            if (!files.length) return;
+
+            const rootFolderName = files[0].webkitRelativePath.split('/')[0] || 'imported-project';
+            
+            const newRoot = {
+                id: 'root-proj',
+                name: rootFolderName,
+                type: 'folder',
+                expanded: true,
+                children: []
+            };
+
+            const promises = files.map(file => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        resolve({
+                            path: file.webkitRelativePath.split('/').slice(1),
+                            content: e.target.result
+                        });
+                    };
+                    reader.readAsText(file);
+                });
+            });
+
+            Promise.all(promises).then(parsedFiles => {
+                parsedFiles.forEach(item => {
+                    if (!item.path.length) return;
+                    let current = newRoot;
+                    for (let i = 0; i < item.path.length; i++) {
+                        const segment = item.path[i];
+                        const isLast = (i === item.path.length - 1);
+
+                        if (isLast) {
+                            current.children.push({
+                                id: 'imported_' + Math.random().toString(36).substr(2, 9),
+                                name: segment,
+                                type: 'file',
+                                language: 'Plain',
+                                content: item.content
+                            });
+                        } else {
+                            let folder = current.children.find(c => c.type === 'folder' && c.name === segment);
+                            if (!folder) {
+                                folder = {
+                                    id: 'imported_f_' + Math.random().toString(36).substr(2, 9),
+                                    name: segment,
+                                    type: 'folder',
+                                    expanded: true,
+                                    children: []
+                                };
+                                current.children.push(folder);
+                            }
+                            current = folder;
+                        }
+                    }
+                });
+
+                rootProject = newRoot;
+                openTabs = [];
+                const firstFile = findFirstFile(rootProject);
+                if (firstFile) {
+                    openTabs.push(firstFile.id);
+                    activeFileId = firstFile.id;
+                }
+                renderFileTree();
+                renderTabBar();
+                if (firstFile) switchToFile(firstFile.id);
+                scheduleWorkspaceAutosave(true);
+                showToast(`Folder "${rootFolderName}" imported!`, 'success');
+            });
+        }
+
+        function handleZipImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const projName = file.name.replace(/\.zip$/i, '');
+
+            JSZip.loadAsync(file).then(zip => {
+                const newRoot = {
+                    id: 'root-proj',
+                    name: projName,
+                    type: 'folder',
+                    expanded: true,
+                    children: []
+                };
+
+                const filePromises = [];
+
+                zip.forEach((relativePath, zipEntry) => {
+                    if (!zipEntry.dir) {
+                        const p = zipEntry.async('string').then(content => {
+                            return { path: relativePath.split('/'), content };
+                        });
+                        filePromises.push(p);
+                    }
+                });
+
+                Promise.all(filePromises).then(parsedFiles => {
+                    parsedFiles.forEach(item => {
+                        let current = newRoot;
+                        for (let i = 0; i < item.path.length; i++) {
+                            const segment = item.path[i];
+                            if (!segment) continue;
+                            const isLast = (i === item.path.length - 1);
+
+                            if (isLast) {
+                                current.children.push({
+                                    id: 'zip_file_' + Math.random().toString(36).substr(2, 9),
+                                    name: segment,
+                                    type: 'file',
+                                    language: 'Code',
+                                    content: item.content
+                                });
+                            } else {
+                                let folder = current.children.find(c => c.type === 'folder' && c.name === segment);
+                                if (!folder) {
+                                    folder = {
+                                        id: 'zip_f_' + Math.random().toString(36).substr(2, 9),
+                                        name: segment,
+                                        type: 'folder',
+                                        expanded: true,
+                                        children: []
+                                    };
+                                    current.children.push(folder);
+                                }
+                                current = folder;
+                            }
+                        }
+                    });
+
+                    rootProject = newRoot;
+                    openTabs = [];
+                    const firstFile = findFirstFile(rootProject);
+                    if (firstFile) {
+                        openTabs.push(firstFile.id);
+                        activeFileId = firstFile.id;
+                    }
+                    renderFileTree();
+                    renderTabBar();
+                    if (firstFile) switchToFile(firstFile.id);
+                    scheduleWorkspaceAutosave(true);
+                    showToast(`Zip "${projName}" imported!`, 'success');
+                });
+            });
+        }
+
+        function findFirstFile(node) {
+            if (node.type === 'file') return node;
+            if (node.children) {
+                for (let child of node.children) {
+                    let f = findFirstFile(child);
+                    if (f) return f;
+                }
+            }
+            return null;
+        }
+
+        // Tab Bar Management
+        function renderTabBar() {
+            const tabList = document.getElementById('tabList');
+            if (!tabList) return;
+
+            tabList.innerHTML = openTabs.map(id => {
+                const node = findNodeById(rootProject, id);
+                if (!node) return '';
+                const isActive = id === activeFileId;
+                return `
+                    <button onclick="switchToFile('${node.id}')" class="tab-item px-3 py-1.5 rounded-t-md ${isActive ? 'bg-theta-codeBg border-t-2 border-theta-accent text-theta-text' : 'hover:bg-theta-panelHover text-theta-muted hover:text-theta-text'} text-xs font-mono flex items-center space-x-2 transition">
+                        <span>${node.name}</span>
+                        <i data-lucide="x" class="w-3 h-3 hover:text-red-400 rounded-full" onclick="closeTab(event, '${node.id}')"></i>
+                    </button>
+                `;
+            }).join('');
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function switchToFile(id) {
+            const node = findNodeById(rootProject, id);
+            if (!node || node.type !== 'file') return;
+
+            if (!openTabs.includes(id)) openTabs.push(id);
+            activeFileId = id;
+
+            renderFileTree();
+            renderTabBar();
+
+            document.getElementById('fileLanguageBadge').innerText = node.language || 'Code';
+            
+            const escapedContent = (node.content || '')
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            document.getElementById('editorCodeContent').innerHTML = `<pre class="whitespace-pre" style="outline:none;" contenteditable="true" spellcheck="false" id="editorEditablePre" oninput="handleEditorInput()" onkeydown="handleEditorKeydown(event)"><code>${escapedContent}</code></pre>`;
+
+            renderEditorLineNumbers(node.content || '');
+        }
+
+        function renderEditorLineNumbers(content) {
+            const lineCount = (content || '').split('\n').length || 1;
+            let linesHtml = '';
+            for (let i = 1; i <= Math.max(lineCount, 12); i++) {
+                linesHtml += `<div>${i}</div>`;
+            }
+            const el = document.getElementById('editorLineNumbers');
+            if (el) el.innerHTML = linesHtml;
+        }
+
+        // Manual edits in the editor write straight back into the same rootProject node the AI
+        // agents read/write — and trigger the same autosave path, so nothing is editor-only.
+        let _editorSaveTimer = null;
+        function handleEditorInput() {
+            const node = findNodeById(rootProject, activeFileId);
+            const pre = document.getElementById('editorEditablePre');
+            if (!node || !pre) return;
+            node.content = pre.innerText;
+            renderEditorLineNumbers(node.content);
+            clearTimeout(_editorSaveTimer);
+            _editorSaveTimer = setTimeout(() => scheduleWorkspaceAutosave(), 800);
+        }
+
+        function handleEditorKeydown(e) {
+            // Plain-text Tab support inside the contenteditable editor (browsers default to
+            // focus-shifting Tab otherwise, which is jarring for a code editor).
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                document.execCommand('insertText', false, '    ');
+            }
+        }
+
+        function closeTab(e, id) {
+            e.stopPropagation();
+            openTabs = openTabs.filter(tabId => tabId !== id);
+            if (activeFileId === id) {
+                activeFileId = openTabs.length > 0 ? openTabs[0] : null;
+            }
+            renderTabBar();
+            if (activeFileId) switchToFile(activeFileId);
+        }
+
+        function filterFileTree(query) {
+            const term = query.toLowerCase();
+            document.querySelectorAll('.file-node').forEach(node => {
+                const text = node.innerText.toLowerCase();
+                node.style.display = text.includes(term) ? 'flex' : 'none';
+            });
+        }
+
+        // Connection status management
+        function setConnectionStatus(status) {
+            currentConnectionStatus = status;
+            const badge = document.getElementById('connectionStatusBadge');
+            const pulseDot = document.getElementById('statusPulseDot');
+            const solidDot = document.getElementById('statusSolidDot');
+            const textEl = document.getElementById('connectionStatusText');
+            if (!badge || !pulseDot || !solidDot || !textEl) return;
+            textEl.innerText = `Terminal: ${status}`;
+            badge.setAttribute('aria-label', `Terminal connection status: ${status}`);
+            const base = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono transition-all duration-300';
+            if (status === 'connected') {
+                badge.className = `${base} bg-emerald-500/10 text-emerald-400 border border-emerald-500/20`;
+                pulseDot.className = 'hidden'; solidDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-emerald-500';
+            } else if (status === 'connecting') {
+                badge.className = `${base} bg-amber-500/10 text-amber-500 border border-amber-500/20`;
+                pulseDot.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75'; solidDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-amber-500';
+            } else {
+                badge.className = `${base} bg-slate-500/10 text-slate-400 border border-slate-500/20`;
+                pulseDot.className = 'hidden'; solidDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-slate-400';
+            }
+        }
+
+        function setPersistenceStatus(status, detail = '') {
+            const badge=document.getElementById('persistenceStatusBadge'); const dot=document.getElementById('persistenceStatusDot'); const text=document.getElementById('persistenceStatusText');
+            if(!badge||!dot||!text) return;
+            const labels={healthy:'Persistence: saved', degraded:'Persistence: local fallback', checking:'Persistence: checking'};
+            const colors={healthy:['bg-emerald-500/10','text-emerald-400','border-emerald-500/20','bg-emerald-500'],degraded:['bg-amber-500/10','text-amber-500','border-amber-500/20','bg-amber-500'],checking:['bg-slate-500/10','text-slate-400','border-slate-500/20','bg-slate-400']};
+            const c=colors[status]||colors.checking; badge.className=`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono ${c[0]} ${c[1]} border ${c[2]}`; dot.className=`inline-flex rounded-full h-2 w-2 ${c[3]}`; text.textContent=detail||labels[status]||labels.checking; badge.setAttribute('aria-label',detail||labels[status]||labels.checking);
+        }
+        function cycleConnectionStatus() { /* removed: production status is read-only */ }
+
+        // =====================================================================================
+        // TERMINAL — real CodeSandbox-backed shell for commands requiring an OS process; tiny safe commands may run locally.
+        // =====================================================================================
+        let terminalClient = null;
+        let terminalSessionProjectId = null;
+        let terminalSeedPaths = new Set();
+        let terminalCwdLabel = '~';
+        let terminalBusy = false;
+
+        function escapeTerminalText(value) {
+            return escapeHtmlText(String(value ?? ''));
+        }
+
+        function appendTerminalOutput(text, stream) {
+            const output = document.getElementById('terminalOutput');
+            if (!output || !text) return;
+            const cls = stream === 'stderr' ? 'text-red-300' : 'text-theta-terminalText';
+            const row = document.createElement('pre');
+            row.className = `whitespace-pre-wrap break-words ${cls} leading-relaxed`;
+            row.textContent = text;
+            output.appendChild(row);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function printTerminalLine(text) {
+            appendTerminalOutput(String(text), 'stdout');
+        }
+
+        function terminalPrompt() {
+            return `<span class="text-emerald-400 font-bold">theta</span><span class="text-theta-muted">:</span><span class="text-cyan-400">${escapeTerminalText(terminalCwdLabel)}</span><span class="text-theta-muted">$</span>`;
+        }
+
+        function printTerminalCommand(command) {
+            const output = document.getElementById('terminalOutput');
+            if (!output) return;
+            const row = document.createElement('div');
+            row.className = 'py-1 font-mono';
+            row.innerHTML = `${terminalPrompt()} <span class="text-theta-text">${escapeTerminalText(command)}</span>`;
+            output.appendChild(row);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function flattenProjectFilesForBackend(node, prefix) {
+            prefix = prefix || '';
+            const out = [];
+            (node.children || []).forEach((child) => {
+                const path = prefix ? `${prefix}/${child.name}` : child.name;
+                if (child.type === 'file') out.push({ path, content: child.content || '' });
+                else if (child.type === 'folder') out.push(...flattenProjectFilesForBackend(child, path));
+            });
+            return out;
+        }
+
+        function findOrCreateFolder(parent, name) {
+            parent.children = parent.children || [];
+            let folder = parent.children.find((child) => child.type === 'folder' && child.name === name);
+            if (!folder) {
+                folder = { id: `terminal-folder-${Date.now()}-${Math.random().toString(36).slice(2)}`, name, type: 'folder', expanded: true, children: [] };
+                parent.children.push(folder);
+            }
+            return folder;
+        }
+
+        function applyTerminalSnapshot(files) {
+            if (!Array.isArray(files)) return;
+            const currentByPath = new Map();
+            const walk = (node, prefix) => {
+                (node.children || []).forEach((child) => {
+                    const path = prefix ? `${prefix}/${child.name}` : child.name;
+                    currentByPath.set(path, child);
+                    if (child.type === 'folder') walk(child, path);
+                });
+            };
+            walk(rootProject, '');
+
+            const returnedPaths = new Set(files.map((file) => file.path));
+            for (const file of files) {
+                const parts = file.path.split('/').filter(Boolean);
+                let parent = rootProject;
+                for (let i = 0; i < parts.length - 1; i++) parent = findOrCreateFolder(parent, parts[i]);
+                const name = parts[parts.length - 1];
+                let node = (parent.children || []).find((child) => child.type === 'file' && child.name === name);
+                if (!node) {
+                    node = { id: `terminal-file-${Date.now()}-${Math.random().toString(36).slice(2)}`, name, type: 'file', language: importedLanguageForName(name), content: file.content || '' };
+                    parent.children.push(node);
+                } else {
+                    node.content = file.content || '';
+                }
+            }
+
+            // Only delete files that were part of the terminal's initial text-file snapshot.
+            // Binary VFS assets are intentionally not materialized by the CodeSandbox shell yet.
+            for (const originalPath of terminalSeedPaths) {
+                if (returnedPaths.has(originalPath)) continue;
+                const parts = originalPath.split('/').filter(Boolean);
+                let parent = rootProject;
+                for (let i = 0; i < parts.length - 1; i++) {
+                    parent = (parent.children || []).find((child) => child.type === 'folder' && child.name === parts[i]);
+                    if (!parent) break;
+                }
+                if (!parent) continue;
+                parent.children = (parent.children || []).filter((child) => !(child.type === 'file' && child.name === parts[parts.length - 1]));
+            }
+
+            terminalSeedPaths = new Set(files.map((file) => file.path));
+            renderFileTree();
+            renderTabBar();
+            scheduleWorkspaceAutosave(false);
+        }
+
+        function updateTerminalControls() {
+            const stop = document.getElementById('terminalStopBtn');
+            if (stop) stop.classList.toggle('hidden', !terminalBusy);
+            const input = document.getElementById('terminalInputField');
+            if (input) input.placeholder = terminalBusy ? 'Command running… type stop/quit or use Stop' : 'Run a command...';
+        }
+
+        async function stopTerminalCommand() {
+            if (!terminalClient?.isConnected()) return;
+            // Release the UI command lock immediately. The remote process is killed in the
+            // background; Android users should never have to wait for a polling cycle before
+            // entering the next command.
+            terminalBusy = false;
+            updateTerminalControls();
+            try {
+                appendTerminalOutput('[terminal] Interrupting current command… exit 130\n', 'stderr');
+                await terminalClient.interrupt();
+            } catch (err) {
+                appendTerminalOutput(`[terminal] Stop failed: ${err?.message || err}\n`, 'stderr');
+            }
+        }
+
+        function setTerminalConnectionState(connected, message) {
+            setConnectionStatus(connected ? 'connected' : 'disconnected');
+            const input = document.getElementById('terminalInputField');
+            if (input) input.disabled = !connected;
+            updateTerminalControls();
+            if (message) appendTerminalOutput(message, connected ? 'stdout' : 'stderr');
+        }
+
+        async function connectRealTerminal() {
+            const projectId = window.activeProject?.id;
+            if (!projectId || !window.TerminalClient) return;
+            if (terminalSessionProjectId === projectId && terminalClient?.isConnected()) return;
+
+            if (terminalClient) await terminalClient.disconnect();
+            terminalClient = new window.TerminalClient();
+            terminalSessionProjectId = projectId;
+            const files = flattenProjectFilesForBackend(rootProject);
+            terminalSeedPaths = new Set(files.map((file) => file.path));
+            setConnectionStatus('connecting');
+            appendTerminalOutput('[terminal] Connecting to the authenticated CodeSandbox shell…\n', 'stdout');
+
+            try {
+                await terminalClient.connect(projectId, files, {
+                    onReady: () => {
+                        setTerminalConnectionState(true, '[terminal] Real bash session ready. Commands execute in an isolated CodeSandbox VM, not in the browser.\n');
+                    },
+                    onOutput: (stream, data) => appendTerminalOutput(data, stream),
+                    onCommandDone: (event) => {
+                        terminalBusy = false;
+                        updateTerminalControls();
+                        applyTerminalSnapshot(event.files);
+                        terminalCwdLabel = event.cwd ? '~/' + String(event.cwd).split('/').filter(Boolean).slice(-3).join('/') : terminalCwdLabel;
+                        const cwdEl = document.getElementById('terminalPromptCwd');
+                        if (cwdEl) cwdEl.textContent = terminalCwdLabel;
+                        appendTerminalOutput(`\n[exit ${event.exitCode}]${event.success ? '' : ' command failed'}\n`, event.success ? 'stdout' : 'stderr');
+                    },
+                    onClosed: (code, signal) => {
+                        terminalBusy = false;
+                        updateTerminalControls();
+                        setTerminalConnectionState(false, `[terminal] Shell closed (code=${code ?? 'null'} signal=${signal ?? 'none'}).\n`);
+                    },
+                    onError: (message) => {
+                        terminalBusy = false;
+                        updateTerminalControls();
+                        setTerminalConnectionState(false, `[terminal] ${message}\n`);
+                    },
+                });
+            } catch (err) {
+                terminalBusy = false;
+                updateTerminalControls();
+                setTerminalConnectionState(false, `[terminal] ${err?.message || err}\n`);
+            }
+        }
+
+        function clearTerminalOutput() {
+            const output = document.getElementById('terminalOutput');
+            if (output) output.innerHTML = '';
+        }
+
+        async function handleTerminalKeydown(e) {
+            if (e.ctrlKey && e.key.toLowerCase() === 'c') {
+                e.preventDefault();
+                if (terminalClient?.isConnected()) await terminalClient.send('\u0003');
+                return;
+            }
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            const field = e.target;
+            const command = field.value;
+            field.value = '';
+            if (!command.trim()) return;
+            if (!terminalClient?.isConnected()) {
+                appendTerminalOutput('[terminal] Not connected. Configure the CodeSandbox executor and sign in first.\n', 'stderr');
+                await connectRealTerminal();
+                return;
+            }
+            if (/^(stop|quit|exit)$/i.test(command.trim())) {
+                if (terminalBusy) { await stopTerminalCommand(); return; }
+                await terminalClient.disconnect();
+                appendTerminalOutput('[terminal] Shell disconnected.\n', 'stdout');
+                return;
+            }
+            // "clear" is handled by LocalExecutor, which returns the raw ANSI escape
+            // sequence "\x1b[2J\x1b[H" for it. That's correct for a real TTY, but this
+            // terminal pane is a plain DOM <pre> renderer (see appendTerminalOutput) that
+            // does not interpret ANSI escape codes — routing "clear" through send() just
+            // printed those control bytes as literal, garbled text instead of clearing
+            // anything. Handle it directly here instead, the same way stop/quit/exit are
+            // intercepted before ever reaching the terminal transport.
+            if (/^clear$/i.test(command.trim())) {
+                clearTerminalOutput();
+                return;
+            }
+            if (terminalBusy) {
+                appendTerminalOutput('[terminal] A command is already running. Use Stop (or type stop/quit/exit) to interrupt it.\n', 'stderr');
+                return;
+            }
+            printTerminalCommand(command);
+            terminalBusy = true;
+            updateTerminalControls();
+            try {
+                await terminalClient.send(command);
+            } catch (err) {
+                terminalBusy = false;
+                updateTerminalControls();
+                appendTerminalOutput(`[terminal] ${err?.message || err}\n`, 'stderr');
+            }
+        }
+
+        // WebResearchTools.research() (src/tools/web-research-tools.ts) dispatches this event
+        // every time an agent's research_web call completes, but nothing ever listened for it —
+        // web research genuinely ran and grounded the agent's next write, but the user had no
+        // visible sign it happened outside the Logs tab. Surface it as a toast so it's honest
+        // about when it's actually being used.
+        window.addEventListener('theta:web-research-complete', (e) => {
+            const detail = e.detail || {};
+            const sourceCount = Array.isArray(detail.sources) ? detail.sources.length : 0;
+            const modeLabel = detail.mode === 'current-tech' ? 'technical' : detail.mode === 'ui-ux' ? 'UI/UX' : 'web';
+            showToast(`Agent researched ${modeLabel} sources for "${detail.query || 'a query'}" (${sourceCount} source${sourceCount === 1 ? '' : 's'})`, 'info');
+        });
+
+        function initTerminalShell() {
+            const input = document.getElementById('terminalInputField');
+            if (input) input.addEventListener('keydown', handleTerminalKeydown);
+            updateTerminalControls();
+            window.addEventListener('theta:active-project-changed', () => {
+                terminalSessionProjectId = null;
+                void connectRealTerminal();
+            });
+        }
+
+        function runCode() {
+            const node = findNodeById(rootProject, activeFileId);
+            switchTab('terminal');
+            if (!node || node.type !== 'file') {
+                appendTerminalOutput('[terminal] Select a runnable source file first.\n', 'stderr');
+                return;
+            }
+            const name = node.name;
+            const ext = name.split('.').pop()?.toLowerCase();
+            let command = '';
+            if (ext === 'js' || ext === 'mjs' || ext === 'cjs') command = `node ${name}`;
+            else if (ext === 'py') command = `python3 ${name}`;
+            else if (name === 'package.json') command = 'npm test';
+            else {
+                appendTerminalOutput(`[terminal] No direct runner is defined for ${name}. Use the terminal to choose the real command.\n`, 'stderr');
+                return;
+            }
+            const input = document.getElementById('terminalInputField');
+            if (input) input.value = command;
+            void handleTerminalKeydown({ key: 'Enter', preventDefault() {}, target: input });
+        }
+
+        async function openProjectPreview(port) {
+            const projectId = window.activeProject?.id;
+            if (!projectId) { showToast('Open a project first.', 'error'); return; }
+            const popup = window.open('about:blank', '_blank');
+            if (!popup) { showToast('Browser blocked the preview tab. Allow pop-ups for Theta and try again.', 'error'); return; }
+            try {
+                popup.document.title = 'Theta Preview';
+                popup.document.body.innerHTML = '<div style="font-family:system-ui;padding:24px">Starting Theta preview…</div>';
+            } catch {}
+            try {
+                const token = await window.thetaGetAccessToken();
+                if (!token) throw new Error('You must be signed in to preview a project.');
+                const files = flattenProjectFilesForBackend(rootProject);
+                const response = await fetch('/api/executor', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ action: 'previewStart', projectId, port: Number(port) || 4173, files }),
+                });
+                const data = await response.json().catch(() => null);
+                if (!response.ok || !data?.url) throw new Error(data?.error || `Preview failed (${response.status}).`);
+                popup.location.href = data.url;
+                showToast(`Preview running on port ${data.port} (${data.framework}).`, 'success');
+                appendTerminalOutput(`[preview] ${data.framework} server → ${data.url}\n`, 'stdout');
+            } catch (err) {
+                try { popup.close(); } catch {}
+                showToast(err?.message || String(err), 'error');
+                appendTerminalOutput(`[preview] ${err?.message || err}\n`, 'stderr');
+            }
+        }
+
+        async function openCustomPortPreview() {
+            const value = window.prompt('Open/attach to a project preview port (e.g. 3000, 4173, 5000, 8000):', '4173');
+            if (value == null) return;
+            const port = Number(value);
+            if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+                showToast('Enter a valid port between 1024 and 65535.', 'error');
+                return;
+            }
+            const projectId = window.activeProject?.id;
+            if (!projectId) { showToast('Open a project first.', 'error'); return; }
+            const popup = window.open('about:blank', '_blank');
+            if (!popup) { showToast('Browser blocked the preview tab. Allow pop-ups for Theta and try again.', 'error'); return; }
+            try { popup.document.body.innerHTML = `<div style="font-family:system-ui;padding:24px">Connecting to port ${port}…</div>`; } catch {}
+            try {
+                const token = await window.thetaGetAccessToken();
+                if (!token) throw new Error('You must be signed in to open a project port.');
+                const response = await fetch('/api/executor', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ action: 'preview', projectId, port }),
+                });
+                const data = await response.json().catch(() => null);
+                if (!response.ok || !data?.url) throw new Error(data?.error || `Could not open port ${port}.`);
+                popup.location.href = data.url;
+            } catch (err) {
+                try { popup.close(); } catch {}
+                showToast(err?.message || String(err), 'error');
+            }
+        }
+
+        // Real terminal + real agent log tabs. Logs come from persisted Supabase ReAct and
+        // execution_runs records; the UI no longer manufactures "hot reload" or success lines.
+        function switchTab(tabName) {
+            const termBtn = document.getElementById('tab-terminal');
+            const logsBtn = document.getElementById('tab-logs');
+            const termOutput = document.getElementById('terminalOutput');
+            const inputRow = document.getElementById('terminalInputRow');
+            if (!termOutput) return;
+
+            if (tabName === 'terminal') {
+                termBtn.className = 'tab-btn text-theta-text font-semibold border-b-2 border-theta-accent py-2 flex items-center space-x-1.5';
+                logsBtn.className = 'tab-btn text-theta-muted hover:text-theta-text py-2 flex items-center space-x-1.5';
+                if (inputRow) inputRow.classList.remove('hidden');
+                void connectRealTerminal();
+                const field = document.getElementById('terminalInputField');
+                if (field) setTimeout(() => field.focus(), 0);
+            } else {
+                logsBtn.className = 'tab-btn text-theta-text font-semibold border-b-2 border-theta-accent py-2 flex items-center space-x-1.5';
+                termBtn.className = 'tab-btn text-theta-muted hover:text-theta-text py-2 flex items-center space-x-1.5';
+                if (inputRow) inputRow.classList.add('hidden');
+                const dot = document.getElementById('agentActivityDot');
+                if (dot) dot.classList.add('hidden');
+                const buffered = window.logAdapter?.getBufferedLogsHTML?.() || '<div class="text-theta-muted">No agent events recorded for this project yet.</div>';
+                termOutput.innerHTML = `<div class="space-y-1 text-theta-muted font-mono text-[11px]" id="agentLogStream">${buffered}</div>`;
+                termOutput.scrollTop = termOutput.scrollHeight;
+            }
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function toggleMaximizeBottom() {
+            const bottomPanel = document.getElementById('bottomPanel');
+            if (!bottomPanel) return;
+            if (isBottomMaximized) {
+                let previous = 192;
+                try { previous = Number(localStorage.getItem('theta.bottom.previousHeight')) || 192; } catch {}
+                bottomPanel.style.height = `${previous}px`;
+                isBottomMaximized = false;
+            } else {
+                try { localStorage.setItem('theta.bottom.previousHeight', String(bottomPanel.offsetHeight)); } catch {}
+                bottomPanel.style.height = 'calc(100% - 60px)';
+                isBottomMaximized = true;
+            }
+        }
+
+        // Theme Switcher
+        function setTheme(theme, announce = true) {
+            activeTheme = theme;
+            try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch {}
+            const root = document.documentElement;
+            if (theme === 'light') {
+                root.classList.remove('dark');
+                root.classList.add('light');
+            } else {
+                root.classList.remove('light');
+                root.classList.add('dark');
+            }
+            if (announce) showToast(`Theme switched to ${theme}`, 'info');
+        }
+
+        function formatChatMessage(text) {
+            if (!text) return '';
+            const codeBlocks = [];
+            const codeBlockRegex = new RegExp('```([a-zA-Z0-9_+-]*)\\n?([\\s\\S]*?)```', 'g');
+            
+            let processedText = text.replace(codeBlockRegex, (match, lang, code) => {
+                const cleanLang = lang.trim() || 'code';
+                const codeId = 'code_' + Math.random().toString(36).substr(2, 9);
+                const escapedCode = code.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+                const blockHtml = `
+                    <div class="my-2 rounded-lg border border-theta-border bg-theta-codeBg overflow-hidden text-theta-text font-mono text-[11px] shadow-sm min-w-0 max-w-full">
+                        <div class="flex justify-between items-center px-3 py-1 bg-theta-panel border-b border-theta-border text-theta-muted select-none">
+                            <span class="text-[10px] font-semibold tracking-wide uppercase text-theta-text">${cleanLang}</span>
+                            <button onclick="copyCodeSnippet('${codeId}', this)" class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] bg-theta-bg border border-theta-border hover:bg-theta-panelHover transition">
+                                <i data-lucide="copy" class="w-3 h-3"></i>
+                                <span>Copy Code</span>
+                            </button>
+                        </div>
+                        <div class="p-2.5 overflow-x-auto min-w-0 max-w-full">
+                            <pre id="${codeId}" class="m-0 font-mono text-[11px] leading-relaxed whitespace-pre font-normal break-words"><code>${escapedCode}</code></pre>
+                        </div>
+                    </div>
+                `;
+                const placeholder = `___BLOCK_${codeBlocks.length}___`;
+                codeBlocks.push(blockHtml);
+                return placeholder;
+            });
+
+            processedText = processedText.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-bold text-theta-text">$1</strong>');
+            processedText = processedText.replace(/`([^`]+)`/g, '<code class="bg-theta-bg px-1 py-0.5 rounded text-indigo-400 font-mono text-[11px] border border-theta-border">$1</code>');
+            processedText = processedText.replace(/\n/g, '<br>');
+
+            codeBlocks.forEach((blockHtml, index) => {
+                processedText = processedText.replace(`___BLOCK_${index}___`, () => blockHtml);
+            });
+
+            return processedText;
+        }
+
+        function copyCodeSnippet(elementId, btn) {
+            const codeEl = document.getElementById(elementId);
+            if (!codeEl) return;
+            const textarea = document.createElement('textarea');
+            textarea.value = codeEl.innerText;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            btn.innerHTML = `<i data-lucide="check" class="w-3 h-3 text-emerald-400"></i><span>Copied</span>`;
+            if (window.lucide) lucide.createIcons();
+            setTimeout(() => { 
+                btn.innerHTML = `<i data-lucide="copy" class="w-3 h-3"></i><span>Copy Code</span>`; 
+                if (window.lucide) lucide.createIcons(); 
+            }, 2000);
+        }
+
+        function copyFullMessage(msgId, btn) {
+            const msgEl = document.getElementById(msgId);
+            if (!msgEl) return;
+            const textarea = document.createElement('textarea');
+            textarea.value = msgEl.innerText;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            btn.innerHTML = `<i data-lucide="check" class="w-3 h-3 text-emerald-400"></i><span>Copied</span>`;
+            if (window.lucide) lucide.createIcons();
+            setTimeout(() => {
+                btn.innerHTML = `<i data-lucide="copy" class="w-3 h-3"></i><span>Copy Msg</span>`;
+                if (window.lucide) lucide.createIcons();
+            }, 2000);
+        }
+
+        function renderInitialMessages() {
+            const chatMessages = document.getElementById('chatMessages');
+            const initMsgId = 'msg_init_' + Math.random().toString(36).substr(2, 9);
+            chatMessages.innerHTML = `
+                <div class="flex space-x-2.5 items-start min-w-0 max-w-full">
+                    <div class="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white shrink-0 shadow">
+                        <i data-lucide="crown" class="w-3.5 h-3.5"></i>
+                    </div>
+                    <div class="flex-1 space-y-1.5 min-w-0 max-w-full">
+                        <div class="flex items-center justify-between">
+                            <span class="font-semibold text-theta-text">Chief</span>
+                            <div class="flex items-center space-x-2">
+                                <button onclick="copyFullMessage('${initMsgId}', this)" class="text-[10px] text-theta-muted hover:text-theta-text flex items-center space-x-1 transition">
+                                    <i data-lucide="copy" class="w-3 h-3"></i>
+                                    <span>Copy Msg</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="${initMsgId}" class="msg-content bg-theta-panel border border-theta-border rounded-2xl rounded-tl-none p-3 text-theta-text leading-relaxed break-words overflow-x-hidden min-w-0">
+                            Hi, I'm Chief. Tell me what you want to build (or import an existing repo from the file panel). I’ll ask only what’s genuinely necessary; once I understand the goal, I’ll write a proposed blueprint here in chat and ask you to confirm it before drafting the executable plan.<br><br>
+                            Need deployment help, Git/Firebase questions, or UI ideas instead? Switch to the <strong>Miko</strong> tab.
+                        </div>
+                    </div>
+                </div>
+            `;
+            if (window.lucide) lucide.createIcons();
+        }
+
+        let activeAgentTab = 'chief';
+        const agentChatBuffers = { chief: null, miko: null };
+        function clearAgentChatBuffersForProjectSwitch() {
+            agentChatBuffers.chief = null;
+            agentChatBuffers.miko = null;
+            const chat = document.getElementById('chatMessages');
+            if (chat) chat.innerHTML = '';
+        }
+        window.addEventListener('theta:active-project-changed', clearAgentChatBuffersForProjectSwitch);
+        window.addEventListener('theta:active-project-cleared', clearAgentChatBuffersForProjectSwitch);
+
+        function switchAgentTab(tabName) {
+            // Persist the outgoing tab's rendered chat before swapping the DOM content, so each
+            // agent keeps its own separate conversation instead of sharing one thread.
+            const chatMessagesEl = document.getElementById('chatMessages');
+            if (chatMessagesEl) agentChatBuffers[activeAgentTab] = chatMessagesEl.innerHTML;
+
+            activeAgentTab = tabName;
+
+            const chiefBtn = document.getElementById('tab-chief');
+            const mikoBtn = document.getElementById('tab-miko');
+            const hint = document.getElementById('agentTabHint');
+            const blueprintPanel = document.getElementById('blueprintPanel');
+            const input = document.getElementById('chatInput');
+
+            const activeCls = ['border-theta-accent', 'text-theta-text'];
+            const inactiveCls = ['border-transparent', 'text-theta-muted'];
+
+            if (tabName === 'chief') {
+                chiefBtn.classList.add(...activeCls);
+                chiefBtn.classList.remove(...inactiveCls);
+                mikoBtn.classList.add(...inactiveCls);
+                mikoBtn.classList.remove(...activeCls);
+                hint.textContent = 'Chief plans and edits live in the workspace — describe a project, or just ask for a specific change.';
+                if (window.chiefAdapter && window.chiefAdapter.getBlueprint().length > 0) {
+                    blueprintPanel.classList.remove('hidden');
+                } else {
+                    blueprintPanel.classList.add('hidden');
+                }
+                if (input) input.placeholder = 'Tell Chief what to build or fix — I’ll decide when a blueprint is warranted... (@ to reference)';
+            } else {
+                mikoBtn.classList.add(...activeCls);
+                mikoBtn.classList.remove(...inactiveCls);
+                chiefBtn.classList.add(...inactiveCls);
+                chiefBtn.classList.remove(...activeCls);
+                hint.textContent = 'Miko can help with deployment, Git/Firebase, and UI ideas — she never writes code herself.';
+                blueprintPanel.classList.add('hidden');
+                if (input) input.placeholder = 'Ask Miko about deploying, Firebase, Git, or UI ideas...';
+            }
+
+            // Restore (or create for the first time) this agent's own chat thread.
+            if (chatMessagesEl) {
+                if (agentChatBuffers[tabName] !== null) {
+                    chatMessagesEl.innerHTML = agentChatBuffers[tabName];
+                } else if (tabName === 'chief') {
+                    renderInitialMessages();
+                } else {
+                    renderInitialMikoMessage();
+                }
+                chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+            }
+
+            if (window.lucide) lucide.createIcons();
+        }
+
+        // Rebuilds an agent's chat thread from its persisted transcript (array of
+        // "User: ..." / "Chief: ..." / "Miko: ..." lines) after Supabase/localStorage rehydration
+        // resolves — called from ChiefChatAdapter/MikoChatAdapter once their conversation loads,
+        // so a page refresh doesn't lose the discussion history. Always wins over whatever's
+        // currently shown (the initial greeting or nothing) since it only fires once real saved
+        // history comes back.
+        function renderRestoredConversation(agentId, lines) {
+            if (!Array.isArray(lines) || lines.length === 0) return;
+
+            const isChief = agentId === 'chief';
+            const avatarCls = isChief ? 'bg-indigo-600' : 'bg-pink-600';
+            const avatarIcon = isChief ? 'crown' : 'sparkles';
+            const label = isChief ? 'Chief' : 'Miko';
+
+            const html = lines.map((line) => {
+                const isUser = line.startsWith('User: ');
+                const agentPrefix = `${label}: `;
+                const text = isUser ? line.slice('User: '.length) : line.startsWith(agentPrefix) ? line.slice(agentPrefix.length) : line;
+
+                if (isUser) {
+                    return `
+                        <div class="flex space-x-2.5 items-start justify-end min-w-0 max-w-full">
+                            <div class="flex-1 space-y-1 text-right min-w-0 max-w-full">
+                                <div class="inline-block text-left bg-theta-accent text-white rounded-2xl rounded-tr-none p-3 max-w-[90%] shadow break-words overflow-x-hidden">
+                                    ${formatChatMessage(text)}
+                                </div>
+                            </div>
+                        </div>`;
+                }
+                return `
+                    <div class="flex space-x-2.5 items-start min-w-0 max-w-full">
+                        <div class="w-6 h-6 rounded-full ${avatarCls} flex items-center justify-center text-white shrink-0 shadow">
+                            <i data-lucide="${avatarIcon}" class="w-3.5 h-3.5"></i>
+                        </div>
+                        <div class="flex-1 space-y-1 min-w-0 max-w-full">
+                            <div class="flex items-center justify-between">
+                                <span class="font-semibold text-theta-text">${label}</span>
+                            </div>
+                            <div class="bg-theta-panel border border-theta-border rounded-2xl rounded-tl-none p-3 text-theta-text leading-relaxed break-words overflow-x-hidden min-w-0">
+                                ${formatChatMessage(text)}
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+
+            agentChatBuffers[agentId] = html;
+            if (activeAgentTab === agentId) {
+                const chatMessages = document.getElementById('chatMessages');
+                if (chatMessages) {
+                    chatMessages.innerHTML = html;
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+            }
+            if (window.lucide) lucide.createIcons();
+        }
+        window.renderRestoredConversation = renderRestoredConversation;
+
+        function renderInitialMikoMessage() {
+            const chatMessages = document.getElementById('chatMessages');
+            const initMsgId = 'msg_init_miko_' + Math.random().toString(36).substr(2, 9);
+            chatMessages.innerHTML = `
+                <div class="flex space-x-2.5 items-start min-w-0 max-w-full">
+                    <div class="w-6 h-6 rounded-full bg-pink-600 flex items-center justify-center text-white shrink-0 shadow">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                    </div>
+                    <div class="flex-1 space-y-1.5 min-w-0 max-w-full">
+                        <div class="flex items-center justify-between">
+                            <span class="font-semibold text-theta-text">Miko</span>
+                            <div class="flex items-center space-x-2">
+                                <button onclick="copyFullMessage('${initMsgId}', this)" class="text-[10px] text-theta-muted hover:text-theta-text flex items-center space-x-1 transition">
+                                    <i data-lucide="copy" class="w-3 h-3"></i>
+                                    <span>Copy Msg</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="${initMsgId}" class="msg-content bg-theta-panel border border-theta-border rounded-2xl rounded-tl-none p-3 text-theta-text leading-relaxed break-words overflow-x-hidden min-w-0">
+                            Hi, I'm Miko! I don't write code myself, but I'm here for deployment questions, Git/Firebase/Supabase setup, UI/UX ideas, or just talking through your project. This is a separate conversation from Chief's — switch back to the <strong>Chief</strong> tab any time to keep planning the build.
+                        </div>
+                    </div>
+                </div>
+            `;
+            if (window.lucide) lucide.createIcons();
+        }
+
+        async function acceptBlueprintAutopilot() {
+            if (!window.chiefAdapter) return;
+            showToast('Starting blueprint in auto-pilot...', 'info');
+            await window.chiefAdapter.acceptBlueprintAutopilot();
+        }
+
+        async function acceptBlueprintManual() {
+            if (!window.chiefAdapter) return;
+            showToast('Blueprint accepted. Theta will ask before each step.', 'info');
+            await window.chiefAdapter.acceptBlueprintManual();
+        }
+
+        function cancelBlueprintDraft() {
+            if (!window.chiefAdapter) return;
+            window.chiefAdapter.cancelBlueprintDraft();
+            showToast('Blueprint draft withdrawn. Nothing was executed.', 'info');
+        }
+
+        async function updateBlueprintFromDiscussion() {
+            if (!window.chiefAdapter) return;
+            await window.chiefAdapter.updateBlueprintFromDiscussion();
+        }
+
+        async function runNextBlueprintStep() {
+            if (!window.chiefAdapter) return;
+            const btn = document.getElementById('blueprintRunNextBtn');
+            if (btn) btn.disabled = true;
+            try {
+                await window.chiefAdapter.runNextStep();
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function pauseBlueprintProject() {
+            if (!window.chiefAdapter) return;
+            const wasRunning = window.chiefAdapter.isRunning();
+            window.chiefAdapter.requestPause();
+            showToast(
+                wasRunning ? 'Pausing after the current step finishes...' : 'Blueprint paused.',
+                'info'
+            );
+        }
+
+        async function resumeBlueprintProject() {
+            if (!window.chiefAdapter) return;
+            await window.chiefAdapter.resumeProject();
+            showToast('Resuming — approve the next step whenever you\'re ready.', 'info');
+        }
+
+        async function editBlueprintSubtask(stepId, subtaskId) {
+            if (!window.chiefAdapter) return;
+            const current = window.chiefAdapter.getSubtaskInstruction(stepId, subtaskId);
+            if (current === null) return;
+            const newTask = await promptModal('Edit instructions for this file before it runs', current);
+            if (newTask === null) return; // cancelled
+            if (!newTask.trim()) {
+                showToast('Instructions cannot be empty.', 'error');
+                return;
+            }
+            const ok = window.chiefAdapter.editNextStepSubtask(subtaskId, newTask);
+            showToast(
+                ok ? 'Instructions updated for the next run.' : 'Could not update — that step may have already started.',
+                ok ? 'success' : 'error'
+            );
+        }
+
+        async function cancelBlueprintProject() {
+            if (!window.chiefAdapter) return;
+            const confirmed = await showConfirmDialog(
+                'Cancel & Revert Project',
+                'This stops execution and reverts every file to the state it was in before this blueprint started. Continue?'
+            );
+            if (!confirmed) return;
+            await window.chiefAdapter.cancelProject();
+        }
+
+        function showConfirmDialog(title, desc) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('customModal');
+                const modalTitle = document.getElementById('modalTitle');
+                const modalDesc = document.getElementById('modalDesc');
+                const modalInput = document.getElementById('modalInput');
+                if (!modal) { resolve(window.confirm(desc)); return; }
+                modalTitle.textContent = title;
+                modalDesc.textContent = desc;
+                modalInput.value = 'confirm'; // non-empty sentinel so closeModal(true) never resolves falsy
+                modalInput.classList.add('hidden');
+                modal.classList.remove('hidden');
+                modalResolver = (value) => {
+                    modalInput.classList.remove('hidden');
+                    resolve(Boolean(value));
+                };
+            });
+        }
+
+        function setGeneratingState(generating) {
+            isGenerating = generating;
+            const sendBtn = document.getElementById('sendBtn');
+            if (!sendBtn) return;
+
+            if (generating) {
+                sendBtn.title = "Stop Generation";
+                sendBtn.className = "flex items-center space-x-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-medium transition shadow-md active:scale-95";
+                sendBtn.innerHTML = `<span>Stop</span><i data-lucide="square" class="w-3.5 h-3.5 fill-current"></i>`;
+            } else {
+                sendBtn.title = "Send Message";
+                sendBtn.className = "flex items-center space-x-1.5 px-3 py-1.5 bg-theta-accent hover:bg-theta-accentHover text-white rounded-lg text-xs font-medium transition shadow-md shadow-theta-accent/20 active:scale-95";
+                sendBtn.innerHTML = `<span>Send</span><i data-lucide="send" class="w-3.5 h-3.5"></i>`;
+            }
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function handleSendOrStop() {
+            if (isGenerating) {
+                generationRunId++;
+                if (activeStreamInterval) { clearInterval(activeStreamInterval); activeStreamInterval = null; }
+                setGeneratingState(false);
+                showToast('Stopped waiting on the response', 'info');
+            } else {
+                sendMessage();
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if ((!text && pendingAttachments.length === 0) || isGenerating) return;
+
+            const chatMessages = document.getElementById('chatMessages');
+            const userMsgId = 'msg_' + Math.random().toString(36).substr(2, 9);
+
+            const attachmentChipsHtml = pendingAttachments.length > 0
+                ? `<div class="flex flex-wrap gap-1 justify-end mb-1">${pendingAttachments.map(a => `<span class="text-[9px] bg-theta-bg border border-theta-border rounded px-1.5 py-0.5 text-theta-muted"><i data-lucide="paperclip" class="w-2.5 h-2.5 inline"></i> ${escapeHtmlText(a.name)}</span>`).join('')}</div>`
+                : '';
+
+            chatMessages.insertAdjacentHTML('beforeend', `
+                <div class="flex space-x-2.5 items-start justify-end min-w-0 max-w-full">
+                    <div class="flex-1 space-y-1 text-right min-w-0 max-w-full">
+                        <div class="flex items-center justify-end space-x-2">
+                            <button onclick="copyFullMessage('${userMsgId}', this)" class="text-[10px] text-theta-muted hover:text-theta-text flex items-center space-x-1 transition">
+                                <i data-lucide="copy" class="w-3 h-3"></i>
+                                <span>Copy Msg</span>
+                            </button>
+                            <span class="text-[10px] text-theta-muted">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        </div>
+                        ${attachmentChipsHtml}
+                        <div id="${userMsgId}" class="msg-content inline-block text-left bg-theta-accent text-white rounded-2xl rounded-tr-none p-3 max-w-[90%] shadow break-words overflow-x-hidden">
+                            ${formatChatMessage(text || '(attachment only)')}
+                        </div>
+                    </div>
+                </div>
+            `);
+
+            // Build the augmented prompt actually sent to the model: user's text plus the full
+            // content of anything attached or @-referenced, so the agent genuinely has that context.
+            let augmentedText = text;
+            if (pendingAttachments.length > 0) {
+                const contextBlock = pendingAttachments
+                    .map(a => `File: ${a.name}\n\`\`\`\n${a.content}\n\`\`\``)
+                    .join('\n\n');
+                augmentedText = `${text}\n\n--- Attached/referenced file context ---\n${contextBlock}`;
+            }
+
+            input.value = '';
+            clearPendingAttachments();
+            if (window.lucide) lucide.createIcons();
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            setGeneratingState(true);
+            const thisGenerationRunId = ++generationRunId;
+
+            const aiMsgId = 'msg_' + Math.random().toString(36).substr(2, 9);
+            const aiBubbleId = 'ai_bubble_' + Math.random().toString(36).substr(2, 9);
+            const isChief = activeAgentTab === 'chief';
+            const agentLabel = isChief ? 'Chief' : 'Miko';
+            const avatarCls = isChief ? 'bg-indigo-600' : 'bg-pink-600';
+            const avatarIcon = isChief ? 'crown' : 'sparkles';
+
+            chatMessages.insertAdjacentHTML('beforeend', `
+                <div id="${aiBubbleId}" class="flex space-x-2.5 items-start min-w-0 max-w-full">
+                    <div class="w-6 h-6 rounded-full ${avatarCls} flex items-center justify-center text-white shrink-0 shadow">
+                        <i data-lucide="${avatarIcon}" class="w-3.5 h-3.5"></i>
+                    </div>
+                    <div class="flex-1 space-y-1 min-w-0 max-w-full">
+                        <div class="flex items-center justify-between">
+                            <span class="font-semibold text-theta-text">${agentLabel}</span>
+                            <button onclick="copyFullMessage('${aiMsgId}', this)" class="text-[10px] text-theta-muted hover:text-theta-text flex items-center space-x-1 transition">
+                                <i data-lucide="copy" class="w-3 h-3"></i>
+                                <span>Copy Msg</span>
+                            </button>
+                        </div>
+                        <div id="${aiMsgId}" class="msg-content bg-theta-panel border border-theta-border rounded-2xl rounded-tl-none p-3 text-theta-text leading-relaxed break-words overflow-x-hidden min-w-0">
+                            <div id="typingIndicator" class="text-[10px] text-theta-muted italic">Thinking…</div>
+                        </div>
+                    </div>
+                </div>
+            `);
+            if (window.lucide) lucide.createIcons();
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            let responseText = '';
+            try {
+                if (isChief && window.chiefAdapter) {
+                    responseText = await window.chiefAdapter.handleUserQuery(augmentedText);
+                } else if (!isChief && window.mikoAdapter) {
+                    responseText = await window.mikoAdapter.handleUserQuery(augmentedText);
+                } else {
+                    responseText = 'The agent runtime is still starting up — please try again in a moment.';
+                }
+            } catch (err) {
+                responseText = `Something went wrong: ${err.message || err}`;
+            }
+
+            if (thisGenerationRunId !== generationRunId) {
+                const staleBubble = document.getElementById(aiMsgId);
+                if (staleBubble) staleBubble.innerHTML = '<span class="text-theta-muted italic text-[10px]">Generation stopped.</span>';
+                return;
+            }
+
+            // Image generation responses (Miko + a Nano Banana model) arrive as a sentinel
+            // instead of markdown text — render them as an actual image, not a typewriter effect.
+            if (responseText.startsWith('__IMAGE__:')) {
+                const dataUrl = responseText.slice('__IMAGE__:'.length);
+                const aiMsgEl = document.getElementById(aiMsgId);
+                if (aiMsgEl) {
+                    aiMsgEl.innerHTML = `<img src="${dataUrl}" class="rounded-lg max-w-full border border-theta-border" alt="Generated image"><div class="mt-1.5"><a href="${dataUrl}" download="theta-generated.png" class="text-[10px] text-theta-accent hover:underline">Download image</a></div>`;
+                }
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                setGeneratingState(false);
+                return;
+            }
+
+            // Reveal the actual model response progressively. The old interval could survive
+            // tab switches or an early stop; keep one owned timer and always clean it up.
+            if (activeStreamInterval) {
+                clearInterval(activeStreamInterval);
+                activeStreamInterval = null;
+            }
+            const aiMsgEl = document.getElementById(aiMsgId);
+            if (aiMsgEl) aiMsgEl.innerHTML = '';
+            let index = 0;
+            activeStreamInterval = setInterval(() => {
+                const target = document.getElementById(aiMsgId);
+                if (!target) {
+                    clearInterval(activeStreamInterval);
+                    activeStreamInterval = null;
+                    return;
+                }
+                index = Math.min(responseText.length, index + 5);
+                target.innerHTML = formatChatMessage(responseText.slice(0, index));
+                if (window.lucide) lucide.createIcons();
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                if (index >= responseText.length) {
+                    clearInterval(activeStreamInterval);
+                    activeStreamInterval = null;
+                    setGeneratingState(false);
+                }
+            }, 18);
+
+            // Empty/failed responses must still terminate the generation state immediately.
+            if (!responseText) {
+                clearInterval(activeStreamInterval);
+                activeStreamInterval = null;
+                setGeneratingState(false);
+            }
+        }
+
+        function initResizers() {
+            const workspace = document.getElementById('workspaceContainer');
+            const leftPanel = document.getElementById('leftPanel');
+            const rightPanel = document.getElementById('rightPanel');
+            const editorPanel = document.getElementById('editorPanel');
+            const bottomPanel = document.getElementById('bottomPanel');
+            const resizerLeft = document.getElementById('resizerLeft');
+            const resizerRight = document.getElementById('resizerRight');
+            const resizerVertical = document.getElementById('resizerVertical');
+            if (!workspace || !leftPanel || !rightPanel || !editorPanel || !bottomPanel || !resizerLeft || !resizerRight || !resizerVertical) return;
+
+            const KEY = 'theta.panelSizes.v2';
+            let sizes = {};
+            try { sizes = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch {}
+            if (Number.isFinite(sizes.left)) leftPanel.style.width = `${sizes.left}px`;
+            if (Number.isFinite(sizes.right)) rightPanel.style.width = `${sizes.right}px`;
+            if (Number.isFinite(sizes.bottom)) bottomPanel.style.height = `${sizes.bottom}px`;
+
+            let drag = null;
+            let raf = 0;
+            const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+            const persist = () => {
+                sizes = { left: leftPanel.offsetWidth, right: rightPanel.offsetWidth, bottom: bottomPanel.offsetHeight };
+                try { localStorage.setItem(KEY, JSON.stringify(sizes)); } catch {}
+            };
+            const begin = (type, e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                drag = { type, x: e.clientX, y: e.clientY, left: leftPanel.offsetWidth, right: rightPanel.offsetWidth, bottom: bottomPanel.offsetHeight };
+                const el = type === 'left' ? resizerLeft : type === 'right' ? resizerRight : resizerVertical;
+                el.classList.add('dragging');
+                document.body.classList.add('theta-resizing', type === 'vertical' ? 'theta-resize-y' : 'theta-resize-x', 'theta-no-transition');
+                try { el.setPointerCapture?.(e.pointerId); } catch {}
+            };
+            const move = (e) => {
+                if (!drag) return;
+                if (e.cancelable) e.preventDefault();
+                const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+                if (raf) return;
+                raf = requestAnimationFrame(() => {
+                    raf = 0;
+                    const rect = workspace.getBoundingClientRect();
+                    if (drag.type === 'left') {
+                        leftPanel.style.width = `${clamp(drag.left + dx, 180, Math.min(520, rect.width - 620))}px`;
+                    } else if (drag.type === 'right') {
+                        rightPanel.style.width = `${clamp(drag.right - dx, 240, Math.min(640, rect.width - 520))}px`;
+                    } else {
+                        const center = editorPanel.parentElement.getBoundingClientRect();
+                        bottomPanel.style.height = `${clamp(drag.bottom - dy, 80, Math.max(140, center.height - 120))}px`;
+                    }
+                });
+            };
+            const end = () => {
+                if (!drag) return;
+                [resizerLeft, resizerRight, resizerVertical].forEach(el => el.classList.remove('dragging'));
+                drag = null;
+                document.body.classList.remove('theta-resizing', 'theta-resize-x', 'theta-resize-y', 'theta-no-transition');
+                persist();
+            };
+            resizerLeft.addEventListener('pointerdown', e => begin('left', e));
+            resizerRight.addEventListener('pointerdown', e => begin('right', e));
+            resizerVertical.addEventListener('pointerdown', e => begin('vertical', e));
+            window.addEventListener('pointermove', move, { passive: false });
+            window.addEventListener('pointerup', end);
+            window.addEventListener('pointercancel', end);
+
+            // Double-click a divider to restore a comfortable default.
+            resizerLeft.addEventListener('dblclick', () => { leftPanel.style.width = '290px'; persist(); });
+            resizerRight.addEventListener('dblclick', () => { rightPanel.style.width = '360px'; persist(); });
+            resizerVertical.addEventListener('dblclick', () => { bottomPanel.style.height = '192px'; persist(); });
+        }
+
+        function togglePanel(panelId) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+            const hidden = panel.style.display === 'none';
+            panel.style.display = hidden ? 'flex' : 'none';
+            try {
+                const state = JSON.parse(localStorage.getItem('theta.panelVisibility.v1') || '{}') || {};
+                state[panelId] = hidden;
+                localStorage.setItem('theta.panelVisibility.v1', JSON.stringify(state));
+            } catch {}
+        }
+
+        function restorePanelVisibility() {
+            try {
+                const state = JSON.parse(localStorage.getItem('theta.panelVisibility.v1') || '{}') || {};
+                Object.entries(state).forEach(([id, visible]) => {
+                    const panel = document.getElementById(id);
+                    if (panel && visible === false) panel.style.display = 'none';
+                });
+            } catch {}
+        }
+
+        function toggleSettingsMenu() {
+            const menu = document.getElementById('settingsMenu');
+            if (menu) menu.classList.toggle('hidden');
+        }
+
+        function toggleUserMenu() {
+            const menu = document.getElementById('userMenuDropdown');
+            if (menu) menu.classList.toggle('hidden');
+        }
+
+        function changeFontSize(size) {
+            document.getElementById('editorCodeContent').style.fontSize = `${size}px`;
+            document.getElementById('editorLineNumbers').style.fontSize = `${size}px`;
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function clearChat() {
+            document.getElementById('chatMessages').innerHTML = '<div class="text-center text-[10px] text-theta-muted py-2">History cleared.</div>';
+            agentChatBuffers[activeAgentTab] = null;
+            showToast('Chat history cleared', 'info');
+        }
+
+        function escapeHtmlText(str) {
+            const div = document.createElement('div');
+            div.textContent = String(str == null ? '' : str);
+            return div.innerHTML;
+        }
+
+        // =====================================================================================
+        // ATTACHMENTS & @-MENTIONS — real file context passed to the AI, not just UI decoration
+        // =====================================================================================
+        let pendingAttachments = []; // { name, content }
+
+        function initChatAttachmentsAndMentions() {
+            document.addEventListener('click', (e) => {
+                const picker = document.getElementById('mentionPicker');
+                if (picker && !picker.classList.contains('hidden') && !picker.contains(e.target) && e.target.id !== 'chatInput') {
+                    picker.classList.add('hidden');
+                }
+            });
+        }
+
+        function triggerAttachment() {
+            document.getElementById('fileInput').click();
+        }
+
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files || []);
+            if (files.length === 0) return;
+
+            let loaded = 0;
+            files.forEach((file) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const content = String(reader.result).slice(0, 20000);
+
+                    // Also materialize the upload as a real node in rootProject — the ONLY
+                    // tree FileSystemTools (read_file/list_files/grep/glob, i.e. what dev
+                    // agents actually use) can see. Without this, the file only ever lived in
+                    // pendingAttachments, which is inline text scoped to Chief's own
+                    // planning/classification call — invisible to any dev agent spawned to do
+                    // the real work. This mirrors what selectMention gets "for free" by only
+                    // ever pointing at files that already exist in rootProject.
+                    const uploadsFolder = findOrCreateFolder(rootProject, 'Chat Uploads');
+                    let node = (uploadsFolder.children || []).find((c) => c.type === 'file' && c.name === file.name);
+                    if (node) {
+                        node.content = content;
+                    } else {
+                        node = { id: 'chat_upload_' + Math.random().toString(36).substr(2, 9), name: file.name, type: 'file', language: importedLanguageForName(file.name), content };
+                        uploadsFolder.children.push(node);
+                    }
+                    const path = `Chat Uploads/${file.name}`;
+
+                    if (!pendingAttachments.some((a) => a.name === path)) {
+                        pendingAttachments.push({ name: path, content });
+                    }
+
+                    loaded++;
+                    renderAttachmentChips();
+                    if (loaded === files.length) {
+                        renderFileTree();
+                        scheduleWorkspaceAutosave(true);
+                        showToast(`Attached ${files.length} file${files.length > 1 ? 's' : ''} — added to the project tree and will be sent with your next message.`, 'success');
+                    }
+                };
+                reader.onerror = () => showToast(`Could not read ${file.name}`, 'error');
+                reader.readAsText(file);
+            });
+            e.target.value = ''; // allow re-selecting the same file later
+        }
+
+        function renderAttachmentChips() {
+            const container = document.getElementById('attachmentChips');
+            if (!container) return;
+            if (pendingAttachments.length === 0) {
+                container.classList.add('hidden');
+                container.innerHTML = '';
+                return;
+            }
+            container.classList.remove('hidden');
+            container.innerHTML = pendingAttachments.map((a, i) => `
+                <span class="flex items-center gap-1 text-[10px] bg-theta-panel border border-theta-border rounded-full pl-2 pr-1 py-0.5 text-theta-text">
+                    <i data-lucide="file-text" class="w-2.5 h-2.5 text-indigo-500"></i>
+                    ${escapeHtmlText(a.name)}
+                    <button onclick="removeAttachment(${i})" class="hover:text-red-400"><i data-lucide="x" class="w-2.5 h-2.5"></i></button>
+                </span>
+            `).join('');
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function removeAttachment(index) {
+            pendingAttachments.splice(index, 1);
+            renderAttachmentChips();
+        }
+
+        function clearPendingAttachments() {
+            pendingAttachments = [];
+            renderAttachmentChips();
+        }
+
+        function toggleMentionPicker() {
+            const picker = document.getElementById('mentionPicker');
+            if (!picker) return;
+            if (picker.classList.contains('hidden')) {
+                openMentionPicker('');
+            } else {
+                picker.classList.add('hidden');
+            }
+        }
+
+        function openMentionPicker(query) {
+            const picker = document.getElementById('mentionPicker');
+            if (!picker) return;
+            const allFiles = [];
+            const walk = (node, prefix) => {
+                if (node.type === 'file') {
+                    allFiles.push(prefix ? `${prefix}/${node.name}` : node.name);
+                    return;
+                }
+                const nextPrefix = node.id === rootProject.id ? '' : (prefix ? `${prefix}/${node.name}` : node.name);
+                (node.children || []).forEach((c) => walk(c, nextPrefix));
+            };
+            walk(rootProject, '');
+
+            const q = (query || '').toLowerCase();
+            const matches = allFiles.filter((f) => f.toLowerCase().includes(q)).slice(0, 20);
+
+            if (matches.length === 0) {
+                picker.innerHTML = `<div class="p-2 text-[11px] text-theta-muted">No files match "${escapeHtmlText(query)}"</div>`;
+            } else {
+                picker.innerHTML = matches.map((f) => `
+                    <button onclick="selectMention('${f.replace(/'/g, "\\'")}')" class="w-full text-left px-2.5 py-1.5 text-[11px] text-theta-text hover:bg-theta-panelHover flex items-center gap-1.5">
+                        <i data-lucide="file-code" class="w-3 h-3 text-theta-muted"></i> ${escapeHtmlText(f)}
+                    </button>
+                `).join('');
+            }
+            picker.classList.remove('hidden');
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function selectMention(filePath) {
+            // Resolve node by walking the path (mirrors FileSystemTools.findNodeByPath logic)
+            const segments = filePath.split('/');
+            let current = rootProject;
+            let found = null;
+            for (let i = 0; i < segments.length; i++) {
+                const seg = segments[i];
+                if (!current || !current.children) { found = null; break; }
+                const match = current.children.find((c) => c.name === seg);
+                if (!match) { found = null; break; }
+                current = match;
+                if (i === segments.length - 1) found = match;
+            }
+
+            if (found && found.type === 'file') {
+                if (!pendingAttachments.some((a) => a.name === filePath)) {
+                    pendingAttachments.push({ name: filePath, content: (found.content || '').slice(0, 20000) });
+                    renderAttachmentChips();
+                }
+            }
+
+            const input = document.getElementById('chatInput');
+            input.value += `@${filePath} `;
+            input.focus();
+            document.getElementById('mentionPicker').classList.add('hidden');
+        }
+
+        function handleChatInputTyping(el) {
+            const value = el.value;
+            const caret = el.selectionStart;
+            const uptoCaret = value.slice(0, caret);
+            const atMatch = uptoCaret.match(/@([\w./-]*)$/);
+            if (atMatch) {
+                openMentionPicker(atMatch[1]);
+            } else {
+                const picker = document.getElementById('mentionPicker');
+                if (picker) picker.classList.add('hidden');
+            }
+        }
+
+        // =====================================================================================
+        // GLOBAL SEARCH (⌘K) — searches file names AND file contents across the whole project
+        // =====================================================================================
+        function initGlobalSearch() {
+            document.addEventListener('keydown', (e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+                    e.preventDefault();
+                    const input = document.getElementById('globalSearchInput');
+                    if (input) { input.focus(); input.select(); }
+                }
+                if (e.key === 'Escape') {
+                    const results = document.getElementById('globalSearchResults');
+                    if (results) results.classList.add('hidden');
+                }
+            });
+            document.addEventListener('click', (e) => {
+                const wrapper = document.getElementById('globalSearchWrapper');
+                const results = document.getElementById('globalSearchResults');
+                if (wrapper && results && !wrapper.contains(e.target)) {
+                    results.classList.add('hidden');
+                }
+            });
+        }
+
+        function handleGlobalSearchInput(query) {
+            const resultsEl = document.getElementById('globalSearchResults');
+            if (!resultsEl) return;
+            const q = query.trim().toLowerCase();
+            if (!q) { resultsEl.classList.add('hidden'); resultsEl.innerHTML = ''; return; }
+
+            const matches = [];
+            const walk = (node, prefix) => {
+                if (node.type === 'file') {
+                    const path = prefix ? `${prefix}/${node.name}` : node.name;
+                    const nameHit = node.name.toLowerCase().includes(q);
+                    const contentIdx = (node.content || '').toLowerCase().indexOf(q);
+                    if (nameHit || contentIdx !== -1) {
+                        let snippet = '';
+                        if (contentIdx !== -1) {
+                            const start = Math.max(0, contentIdx - 25);
+                            snippet = (start > 0 ? '…' : '') + node.content.slice(start, contentIdx + q.length + 35).replace(/\n/g, ' ') + '…';
+                        }
+                        matches.push({ id: node.id, path, snippet, nameHit });
+                    }
+                    return;
+                }
+                const nextPrefix = node.id === rootProject.id ? '' : (prefix ? `${prefix}/${node.name}` : node.name);
+                (node.children || []).forEach((c) => walk(c, nextPrefix));
+            };
+            walk(rootProject, '');
+
+            if (matches.length === 0) {
+                resultsEl.innerHTML = `<div class="p-3 text-[11px] text-theta-muted text-center">No matches for "${escapeHtmlText(query)}"</div>`;
+            } else {
+                resultsEl.innerHTML = matches.slice(0, 30).map((m) => `
+                    <button onclick="openSearchResult('${m.id}')" class="w-full text-left px-3 py-2 hover:bg-theta-panelHover border-b border-theta-border/40 last:border-0">
+                        <div class="text-[11px] font-medium text-theta-text flex items-center gap-1.5">
+                            <i data-lucide="${m.nameHit ? 'file' : 'file-search'}" class="w-3 h-3 text-theta-muted"></i> ${escapeHtmlText(m.path)}
+                        </div>
+                        ${m.snippet ? `<div class="text-[10px] text-theta-muted mt-0.5 font-mono truncate">${escapeHtmlText(m.snippet)}</div>` : ''}
+                    </button>
+                `).join('');
+            }
+            resultsEl.classList.remove('hidden');
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function openSearchResult(nodeId) {
+            const node = findNodeById(rootProject, nodeId);
+            if (!node) return;
+            if (!openTabs.includes(nodeId)) openTabs.push(nodeId);
+            activeFileId = nodeId;
+            renderTabBar();
+            switchToFile(nodeId);
+            document.getElementById('globalSearchResults').classList.add('hidden');
+            document.getElementById('globalSearchInput').value = '';
+        }
+
+        // =====================================================================================
+        // COMMIT HISTORY / RESTORE
+        // =====================================================================================
+        function initCommitUI() {
+            window.onCommitsChanged = renderCommitsList;
+        }
+
+        function openCommitModal() {
+            document.getElementById('commitModal').classList.remove('hidden');
+            renderCommitsList();
+        }
+
+        function closeCommitModal() {
+            document.getElementById('commitModal').classList.add('hidden');
+        }
+
+        async function createManualCommit() {
+            const input = document.getElementById('commitMessageInput');
+            const message = (input.value || '').trim() || 'Manual checkpoint';
+            if (!window.CommitManager) { showToast('Commit system not ready yet', 'error'); return; }
+            await window.CommitManager.createCommit(message, 'manual');
+            input.value = '';
+            showToast('Commit saved.', 'success');
+            renderCommitsList();
+        }
+
+        async function renderCommitsList() {
+            const listEl = document.getElementById('commitList');
+            if (!listEl || !window.CommitManager) return;
+            listEl.innerHTML = `<div class="text-theta-muted text-center py-4">Loading commits…</div>`;
+            const commits = await window.CommitManager.listCommits(30);
+            if (commits.length === 0) {
+                listEl.innerHTML = `<div class="text-theta-muted text-center py-4">No commits yet. Make one above, or run a blueprint step (auto-commits after every step).</div>`;
+                return;
+            }
+            listEl.innerHTML = commits.map((c) => `
+                <div class="border border-theta-border rounded-md p-2 flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <div class="text-theta-text font-medium truncate">${escapeHtmlText(c.message)}</div>
+                        <div class="text-[10px] text-theta-muted flex items-center gap-1.5 mt-0.5">
+                            <span class="uppercase tracking-wide ${c.kind === 'auto' ? 'text-cyan-400' : 'text-amber-400'}">${c.kind}</span>
+                            <span>${new Date(c.created_at).toLocaleString()}</span>
+                        </div>
+                    </div>
+                    <div class="shrink-0 flex items-center gap-1.5">
+                        <button onclick="viewCommitDiff('${c.id}', ${JSON.stringify(c.message)})" class="text-[10px] px-2 py-1 rounded bg-theta-panelHover text-theta-muted hover:text-theta-text">Diff</button>
+                        <button onclick="restoreCommitById('${c.id}')" class="text-[10px] px-2 py-1 rounded bg-theta-accent/15 text-theta-accent hover:bg-theta-accent/25">Restore</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // =====================================================================================
+        // FILE-BY-FILE DIFF VIEW (Phase 4) — shared modal for a blueprint step's live diff
+        // (in-progress or completed) and for browsing a past commit's diff.
+        // =====================================================================================
+        function openDiffModal(title) {
+            const titleEl = document.getElementById('diffModalTitle').querySelector('span');
+            if (titleEl) titleEl.textContent = title;
+            document.getElementById('diffModalBody').innerHTML = `<div class="text-theta-muted text-center py-4">Loading diff…</div>`;
+            document.getElementById('diffModal').classList.remove('hidden');
+            if (typeof lucide?.createIcons === 'function') lucide.createIcons();
+        }
+
+        function closeDiffModal() {
+            document.getElementById('diffModal').classList.add('hidden');
+        }
+
+        function diffLineClass(type) {
+            if (type === 'add') return 'block bg-emerald-500/15 text-emerald-300 px-2 whitespace-pre-wrap break-all';
+            if (type === 'remove') return 'block bg-red-500/15 text-red-300 px-2 whitespace-pre-wrap break-all';
+            return 'block text-theta-muted px-2 whitespace-pre-wrap break-all';
+        }
+
+        function renderDiffLine(line) {
+            const prefix = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
+            return `<span class="${diffLineClass(line.type)}">${escapeHtmlText(prefix + ' ' + line.text)}</span>`;
+        }
+
+        function renderDiffResults(results) {
+            const body = document.getElementById('diffModalBody');
+            if (!results || results.length === 0) {
+                body.innerHTML = `<div class="text-theta-muted text-center py-4">No file changes to show yet.</div>`;
+                return;
+            }
+            const statusLabel = { added: 'Added', removed: 'Removed', modified: 'Modified' };
+            const statusColor = { added: 'text-emerald-400', removed: 'text-red-400', modified: 'text-amber-400' };
+            body.innerHTML = results.map((f) => `
+                <div class="border border-theta-border rounded-md overflow-hidden">
+                    <div class="px-2 py-1 bg-theta-bg/60 flex items-center justify-between text-[11px] gap-2">
+                        <span class="font-mono text-theta-text truncate">${escapeHtmlText(f.path)}</span>
+                        <span class="uppercase tracking-wide font-semibold shrink-0 ${statusColor[f.status] || ''}">${statusLabel[f.status] || f.status}</span>
+                    </div>
+                    <pre class="text-[10px] leading-[1.4] overflow-x-auto max-h-72 overflow-y-auto m-0 py-1"><code>${f.lines.map(renderDiffLine).join('')}</code></pre>
+                </div>
+            `).join('');
+        }
+
+        function showDiffError(message) {
+            document.getElementById('diffModalBody').innerHTML = `<div class="text-red-400 text-center py-4">${escapeHtmlText(message)}</div>`;
+        }
+
+        async function viewStepDiff(stepId) {
+            openDiffModal(`Step ${stepId} — File Diff`);
+            if (!window.FileDiffService) { showDiffError('Diff engine is still starting up — try again in a moment.'); return; }
+            const blueprint = window.chiefAdapter && typeof window.chiefAdapter.getBlueprint === 'function'
+                ? window.chiefAdapter.getBlueprint() : [];
+            const step = blueprint.find((s) => s.stepId === stepId);
+            const targetFiles = step ? step.subtasks.map((t) => t.targetFile) : [];
+            try {
+                const results = await window.FileDiffService.getStepDiff(stepId, targetFiles);
+                renderDiffResults(results);
+            } catch (err) {
+                showDiffError('Failed to load this step\'s diff: ' + (err && err.message ? err.message : String(err)));
+            }
+        }
+
+        async function viewCommitDiff(commitId, label) {
+            openDiffModal(label || 'Commit Diff');
+            if (!window.FileDiffService) { showDiffError('Diff engine is still starting up — try again in a moment.'); return; }
+            try {
+                const results = await window.FileDiffService.getCommitDiff(commitId);
+                renderDiffResults(results);
+            } catch (err) {
+                showDiffError('Failed to load this commit\'s diff: ' + (err && err.message ? err.message : String(err)));
+            }
+        }
+
+        async function restoreCommitById(commitId) {
+            const confirmed = await showConfirmDialog('Restore Commit', 'This replaces your current files with this commit\'s snapshot. Your current state is auto-committed first so you can undo this too. Continue?');
+            if (!confirmed) return;
+            if (window.CommitManager) {
+                await window.CommitManager.createCommit('Auto-commit before restore', 'auto');
+                const ok = await window.CommitManager.restoreCommit(commitId);
+                if (ok) {
+                    showToast('Workspace restored to that commit.', 'success');
+                    renderCommitsList();
+                } else {
+                    showToast('Could not restore that commit.', 'error');
+                }
+            }
+        }
+
+    </script>
+
+    <!-- Boots the real Chief/Miko/Dev agent runtime (key manager, orchestrator, Supabase sync). -->
+    <script type="module" src="/src/index.ts"></script>
+
+<script>
+(function () {
+  // Truthful execution telemetry: these events come from actual dispatch/tool boundaries,
+  // not from optimistic UI state. The UI can display them wherever the Logs renderer exists.
+  window.__thetaExecutionTruth = window.__thetaExecutionTruth || [];
+  window.addEventListener('theta:execution-truth', function (event) {
+    if (!event.detail) return;
+    window.__thetaExecutionTruth.push(event.detail);
+    window.dispatchEvent(new CustomEvent('theta:logs-refresh', { detail: event.detail }));
+  });
+})();
+</script>
+
+</body>
+</html>
