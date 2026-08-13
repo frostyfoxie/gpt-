@@ -127,10 +127,6 @@ async function syncFiles(client, files, deletedPaths = [], workspace = THETA_WOR
     const stagedManifest = `${stage}/.theta-manifest.json`;
     await client.commands.run(`printf %s ${shellQuote(manifest)} | base64 -d > ${shellQuote(stagedManifest)}`);
 
-    // Snapshot every path that the commit may change. If any later command
-    // fails, the snapshot lets us restore the exact pre-sync state before the
-    // error is returned. The manifest is still moved last, so it never claims
-    // a sync that was only partially committed.
     const affectedPaths = [...new Set([...toWrite.map((file) => file.path), ...deleted])];
     const backupCommands = affectedPaths.map((path) => {
       const target = `${workspace}/${path}`;
@@ -151,9 +147,6 @@ async function syncFiles(client, files, deletedPaths = [], workspace = THETA_WOR
     try {
       if (commitCommands.length) await client.commands.run(commitCommands.join(' && '));
     } catch (commitError) {
-      // Restore every affected path. Removing first also handles a newly
-      // created file where no backup existed, and cp -a restores the exact
-      // previous file for paths that did exist.
       const rollbackCommands = affectedPaths.map((path) => {
         const target = `${workspace}/${path}`;
         const saved = `${backup}/${path}`;
@@ -187,7 +180,7 @@ async function runCommandWithStatus(client, command, timeoutMs = DEFAULT_TIMEOUT
   const out = `/tmp/${id}.out`;
   const err = `/tmp/${id}.err`;
   const timeoutMarker = `/tmp/${id}.timedout`;
-  const pidFile = '/tmp/theta-current-command.pid';
+  const pidFile = `/tmp/${id}.pid`;
   const seconds = Math.max(1, Math.ceil(Math.min(timeoutMs, MAX_TIMEOUT) / 1000));
   const cwdFile = '/tmp/theta-terminal-cwd';
   const terminalScript = persistCwd
@@ -196,7 +189,7 @@ async function runCommandWithStatus(client, command, timeoutMs = DEFAULT_TIMEOUT
   const wrapper = `set +e; rm -f ${shellQuote(timeoutMarker)}; setsid bash -lc ${shellQuote(terminalScript)} > ${shellQuote(out)} 2> ${shellQuote(err)} & pid=$!; echo $pid > ${shellQuote(pidFile)}; (sleep ${seconds}; if kill -0 $pid 2>/dev/null; then printf '1' > ${shellQuote(timeoutMarker)}; kill -- -$pid 2>/dev/null || true; fi) & watchdog=$!; wait $pid; code=$?; kill $watchdog 2>/dev/null || true; rm -f ${shellQuote(pidFile)}; printf '__THETA_EXIT__%s\n' "$code"`;
   let wrapperOutput = '';
   try { wrapperOutput = String(await client.commands.run(wrapper) ?? ''); }
-  catch (error) { return { success: false, stdout: '', stderr: error?.message || String(error), exitCode: null, timedOut: false, error: error?.message || String(error) }; }
+  catch (error) { return { success: false, stdout: '', stderr: error?.message || String(error), exitCode: null, timedOut: false, error: error?.message || String(error), pidFile }; }
   let stdout = '', stderr = '';
   try { stdout = String(await client.commands.run(`cat ${shellQuote(out)} 2>/dev/null || true`) ?? ''); } catch {}
   try { stderr = String(await client.commands.run(`cat ${shellQuote(err)} 2>/dev/null || true`) ?? ''); } catch {}
@@ -204,8 +197,8 @@ async function runCommandWithStatus(client, command, timeoutMs = DEFAULT_TIMEOUT
   try { timedOut = String(await client.commands.run(`test -f ${shellQuote(timeoutMarker)} && printf 1 || printf 0`) ?? '').trim() === '1'; } catch {}
   const match = wrapperOutput.match(/__THETA_EXIT__(\d+)/);
   const exitCode = match ? Number(match[1]) : null;
-  try { await client.commands.run(`rm -f ${shellQuote(out)} ${shellQuote(err)} ${shellQuote(timeoutMarker)}`); } catch {}
-  return { success: exitCode === 0 && !timedOut, stdout, stderr, exitCode, timedOut, error: timedOut ? `Command timed out after ${Math.min(timeoutMs, MAX_TIMEOUT)}ms.` : (exitCode === null ? 'Could not determine command exit status.' : undefined) };
+  try { await client.commands.run(`rm -f ${shellQuote(out)} ${shellQuote(err)} ${shellQuote(timeoutMarker)} ${shellQuote(pidFile)}`); } catch {}
+  return { success: exitCode === 0 && !timedOut, stdout, stderr, exitCode, timedOut, error: timedOut ? `Command timed out after ${Math.min(timeoutMs, MAX_TIMEOUT)}ms.` : (exitCode === null ? 'Could not determine command exit status.' : undefined), pidFile };
 }
 
 export { parsePort, processKey, projectKey, startManagedBackground, stopManagedBackground, findAvailablePort, syncFiles, runCommandWithStatus };
