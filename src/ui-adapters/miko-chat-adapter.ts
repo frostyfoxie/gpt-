@@ -4,20 +4,19 @@ import { KeyManager } from '../config/keys';
 import { ModelManager } from '../config/models';
 import { ConversationSync } from '../lib/supabase/conversation-sync';
 import { explainGeminiAuthError } from '../lib/gemini-error';
-import { onActiveProjectChanged } from '../engine/active-project';
+import { onActiveProjectChanged, getActiveProjectId } from '../engine/active-project';
+import { WebResearchTools } from '../tools/web-research-tools';
+import { formatExternalWebContent } from '../lib/untrusted-content';
+import { formatAgentContextForPrompt, getRecentAgentContext, publishAgentContext } from '../engine/agent-context';
 
-/** Cap on how much conversation history gets fed back into Miko's prompt (most recent wins). */
 const MAX_CONVERSATION_PROMPT_CHARS = 6000;
 
 export class MikoChatAdapter {
   private ai: LLMClient | null = null;
-  /** The pooled key currently backing `ai` — released once the in-flight query/image call finishes. */
   private currentKey: string | null = null;
   private conversation: string[] = [];
 
   constructor() {
-    // SSR guard before binding DOM listeners. The Gemini client is created lazily
-    // (see getClient()) so a missing key never crashes app boot.
     if (typeof window !== 'undefined') {
       this.bindMikoEvents();
       (window as any).mikoAdapter = this;
@@ -26,10 +25,6 @@ export class MikoChatAdapter {
     }
   }
 
-  /**
-   * Restores Miko's discussion history from Supabase (or its localStorage fallback) on load,
-   * so a page refresh doesn't lose the thread of an ongoing deployment/UI conversation.
-   */
   private async rehydrateConversation(): Promise<void> {
     try {
       this.conversation = [];
@@ -45,132 +40,114 @@ export class MikoChatAdapter {
     }
   }
 
-  /** Fire-and-forget persistence — never blocks the chat turn on a network round trip. */
   private persistConversation(): void {
     void ConversationSync.save('miko', this.conversation);
   }
 
-  /** Joins the transcript for the prompt, keeping only the most recent messages within the char budget. */
   private getConversationForPrompt(): string {
-    if (this.conversation.length === 0) return '';
+    if (!this.conversation.length) return '';
     let text = this.conversation.join('\n');
     if (text.length > MAX_CONVERSATION_PROMPT_CHARS) {
-      text = '... [earlier messages truncated for prompt size]\n' + text.slice(-MAX_CONVERSATION_PROMPT_CHARS);
+      text = '... [earlier messages truncated]\n' + text.slice(-MAX_CONVERSATION_PROMPT_CHARS);
     }
     return text;
   }
 
-  /**
-   * Lazily creates (and caches) the Gemini client for Miko, throwing a friendly error only
-   * at the moment a message is actually sent. Phase 3: pulls from the shared key pool
-   * (keyed by whatever model Miko is currently set to) instead of a fixed 'miko' key, and
-   * releases the claimed key once the call it was acquired for finishes (see
-   * handleUserQuery/generateImage) so it's immediately available again for other roles.
-   */
   private getClient(model: string): LLMClient {
     if (!this.ai) {
       const provider = ModelManager.getProvider(model);
-      const mikoKey = KeyManager.getAvailableKey('miko', model, provider);
-      this.currentKey = mikoKey;
-      this.ai = new LLMClient(mikoKey, provider);
+      this.currentKey = KeyManager.getAvailableKey('miko', model, provider);
+      this.ai = new LLMClient(this.currentKey, provider);
     }
     return this.ai;
   }
 
-  /** Releases the currently-held pooled key (if any) and drops the cached client so the next call re-acquires. */
   private releaseClient(): void {
-    if (this.currentKey) {
-      KeyManager.releaseKey(this.currentKey);
-      this.currentKey = null;
-    }
+    if (this.currentKey) KeyManager.releaseKey(this.currentKey);
+    this.currentKey = null;
     this.ai = null;
   }
 
   private bindMikoEvents() {
-    // Hooks into the Miko tab interface in the UI
     const mikoTabBtn = document.getElementById('tab-miko');
-    if (mikoTabBtn) {
-      mikoTabBtn.addEventListener('click', () => this.onMikoTabSelected());
-    }
+    if (mikoTabBtn) mikoTabBtn.addEventListener('click', () => this.onMikoTabSelected());
   }
 
   private onMikoTabSelected() {
-    console.log('[Miko Assistant] Active and observing codebase state.');
+    console.log('[Miko] Conversational/research mode active.');
   }
 
-  /**
-   * Handles user inquiries sent specifically to Miko. If the user has selected an image
-   * model in the model picker, this generates an image instead of text and returns it as
-   * a special "__IMAGE__:<dataURL>" sentinel that the chat UI knows to render as an <img>.
-   */
   public async handleUserQuery(userQuery: string): Promise<string> {
     const model = ModelManager.getModel('miko');
-
     this.conversation.push(`User: ${userQuery}`);
     this.persistConversation();
 
     if (ModelManager.isImageModel(model)) {
       const result = await this.generateImage(userQuery, model);
-      // Don't store the actual data URL in the transcript — it's huge and would bloat both
-      // the prompt budget and the persisted row. A short placeholder keeps the thread coherent.
-      this.conversation.push(
-        result.startsWith('__IMAGE__:') ? 'Miko: [Generated an image]' : `Miko: ${result}`
-      );
+      this.conversation.push(result.startsWith('__IMAGE__:') ? 'Miko: [Generated an image]' : `Miko: ${result}`);
       this.persistConversation();
+      publishAgentContext({ projectId: getActiveProjectId() ?? undefined, source: 'miko', kind: 'observation', text: `Miko handled the user's request: ${userQuery}` });
       return result;
     }
 
-    // Safely retrieve current codebase state
     const currentCodebase = typeof window !== 'undefined' ? (window as any).rootProject || {} : {};
-
-    // Stringify with a character limit safeguard
     let codebaseContextStr = '';
     try {
       codebaseContextStr = JSON.stringify(currentCodebase, null, 2);
-      if (codebaseContextStr.length > 8000) {
-        codebaseContextStr = codebaseContextStr.substring(0, 8000) + '\n... [Context Truncated for Prompt Safety]';
-      }
+      if (codebaseContextStr.length > 8000) codebaseContextStr = codebaseContextStr.substring(0, 8000) + '\n... [truncated]';
     } catch {
       codebaseContextStr = '{ "error": "Unable to serialize workspace tree" }';
     }
 
+    let webContext = '';
+    if (/(https?:\/\/|research|documentation|docs|latest|current|inspiration|reference|awwwards|design|library|api)/i.test(userQuery)) {
+      try {
+        const result = await WebResearchTools.research({
+          query: userQuery,
+          mode: /design|inspiration|awwwards/i.test(userQuery) ? 'ui-ux' : 'current-tech',
+          projectId: getActiveProjectId() ?? undefined,
+        });
+        if (result.ok) {
+          webContext = formatExternalWebContent(
+            result.sources.map((s) => s.uri).join(', ') || 'web research',
+            JSON.stringify({ summary: result.summary, technicalUpdates: result.technicalUpdates, designPatterns: result.designPatterns, sources: result.sources }, null, 2)
+          );
+        }
+      } catch (error) {
+        console.warn('[Miko] Web research unavailable:', error);
+      }
+    }
+
+    const sharedContext = formatAgentContextForPrompt(getRecentAgentContext(getActiveProjectId() ?? undefined, 12, 'miko'));
     const conversationBlock = this.getConversationForPrompt();
+    const prompt = `You are Miko, Theta's conversational and research assistant.
 
-    const prompt = `You are Miko, a friendly and highly knowledgeable developer support assistant inside Theta Workbench.
+You may READ the current codebase and research the web, but you MUST NOT modify files, run coding tasks, or pretend that you executed changes. Chief is the sole project mutation/execution authority.
 
-Your Role:
-1. Help the user with deployment questions (e.g., Git, Firebase integration, Vercel).
-2. Suggest UI/UX enhancements and code optimization strategies.
-3. Answer technical questions about the current project.
-
-STRICT BOUNDARIES:
-- You are an assistant ONLY.
-- You CANNOT write code directly to files or trigger dev execution steps.
-- Do not pretend to be Chief or issue developer orders.
-
-Current Codebase Context:
+Current codebase context:
 ${codebaseContextStr}
 
-Conversation so far (the last line is the user's current message — respond to that, using the earlier lines for context so you don't re-ask or re-explain things already covered):
-${conversationBlock}`;
+Shared observations from Chief:
+${sharedContext}
+
+Live web research, when available:
+${webContext || '(no web research was needed)'}
+
+Conversation:
+${conversationBlock}
+
+Respond naturally to the user's latest message. If you notice something Chief should know, state it clearly so the shared context can carry it to Chief.`;
 
     try {
       const ai = this.getClient(model);
-      const response = await callWithBackoff<any>(() =>
-        ai.models.generateContent({
-          model,
-          contents: prompt,
-        })
-      );
-
-      const reply = response.text || 'I am observing your codebase. How can I help you deploy or refine your project?';
+      const response = await callWithBackoff<any>(() => ai.models.generateContent({ model, contents: prompt }));
+      const reply = response.text || 'I am observing the project. How can I help?';
       this.conversation.push(`Miko: ${reply}`);
       this.persistConversation();
+      publishAgentContext({ projectId: getActiveProjectId() ?? undefined, source: 'miko', kind: 'observation', text: reply });
       return reply;
     } catch (error: any) {
-      if (error?.name === 'PoolExhaustedError') {
-        return `Miko Assistant Error: ${error.message}`;
-      }
+      if (error?.name === 'PoolExhaustedError') return `Miko Assistant Error: ${error.message}`;
       if (typeof window !== 'undefined' && typeof (window as any).openApiKeysModal === 'function' && /Missing API key/i.test(error?.message || '')) {
         (window as any).openApiKeysModal();
       }
@@ -181,68 +158,34 @@ ${conversationBlock}`;
     }
   }
 
-  /** Generates an image via a Nano Banana model and returns it as a data URL sentinel string. */
   private async generateImage(userQuery: string, model: string): Promise<string> {
     try {
       const ai = this.getClient(model);
-      const response = await callWithBackoff<any>(() =>
-        ai.models.generateContent({
-          model,
-          contents: userQuery,
-          config: {
-            responseModalities: ['IMAGE'],
-            imageConfig: { imageSize: '2K' },
-          },
-        })
-      );
-
+      const response = await callWithBackoff<any>(() => ai.models.generateContent({
+        model,
+        contents: userQuery,
+        config: { responseModalities: ['IMAGE'], imageConfig: { imageSize: '2K' } },
+      }));
       const parts = (response as any)?.candidates?.[0]?.content?.parts || [];
       const imagePart = parts.find((p: any) => p.inlineData?.data);
-
       if (imagePart) {
         const mimeType = imagePart.inlineData.mimeType || 'image/png';
         return `__IMAGE__:data:${mimeType};base64,${imagePart.inlineData.data}`;
       }
-
-      return response.text || 'I could not generate an image from that prompt — try describing it differently.';
+      return response.text || 'I could not generate an image from that prompt.';
     } catch (error: any) {
-      if (error?.name === 'PoolExhaustedError') {
-        return `Miko Assistant Error (image generation): ${error.message}`;
-      }
-      if (typeof window !== 'undefined' && typeof (window as any).openApiKeysModal === 'function' && /Missing API key/i.test(error?.message || '')) {
-        (window as any).openApiKeysModal();
-      }
       const authExplanation = explainGeminiAuthError(error);
-      return `Miko Assistant Error (image generation): ${authExplanation || 'Image generation is temporarily unavailable.'}`;
+      return `Miko Assistant Error (image generation): ${authExplanation || error.message || 'Image generation is temporarily unavailable.'}`;
     } finally {
       this.releaseClient();
     }
   }
 
-  /**
-   * Renders Miko's chat response into the right panel UI.
-   */
   public renderMikoMessage(text: string) {
     if (typeof window === 'undefined') return;
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
-
-    const msgHtml = `
-      <div class="flex space-x-2.5 items-start min-w-0 max-w-full my-2">
-        <div class="w-6 h-6 rounded-full bg-pink-600 flex items-center justify-center text-white shrink-0 shadow">
-          <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
-        </div>
-        <div class="flex-1 space-y-1 min-w-0 max-w-full">
-          <div class="flex items-center justify-between">
-            <span class="font-semibold text-pink-400 text-xs">Miko Assistant</span>
-          </div>
-          <div class="bg-theta-panel border border-pink-500/20 rounded-2xl rounded-tl-none p-3 text-theta-text text-xs leading-relaxed">
-            ${text}
-          </div>
-        </div>
-      </div>
-    `;
-
+    const msgHtml = `<div class="flex space-x-2.5 items-start min-w-0 max-w-full my-2"><div class="w-6 h-6 rounded-full bg-pink-600 flex items-center justify-center text-white shrink-0 shadow"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i></div><div class="flex-1 space-y-1 min-w-0 max-w-full"><div class="font-semibold text-pink-400 text-xs">Miko</div><div class="bg-theta-panel border border-pink-500/20 rounded-2xl rounded-tl-none p-3 text-theta-text text-xs leading-relaxed">${text}</div></div></div>`;
     chatMessages.insertAdjacentHTML('beforeend', msgHtml);
     if ((window as any).lucide) (window as any).lucide.createIcons();
     chatMessages.scrollTop = chatMessages.scrollHeight;
